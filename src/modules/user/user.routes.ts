@@ -41,7 +41,7 @@ router.get('/me', async (req: Request, res: Response) => {
     }
 
     res.json({ success: true, data });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Profil bilgileri alınamadı.' });
   }
 });
@@ -161,7 +161,7 @@ router.put('/me', async (req: Request, res: Response) => {
     }
 
     res.json({ success: true, data, message: 'Profil güncellendi.' });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Profil güncellenirken hata oluştu.' });
   }
 });
@@ -188,7 +188,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     }
 
     res.json({ success: true, data });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Kullanıcı bilgileri alınamadı.' });
   }
 });

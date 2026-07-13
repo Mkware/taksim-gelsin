@@ -158,7 +158,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     };
 
     next();
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       error: 'Kimlik doğrulama sırasında bir hata oluştu.',
@@ -210,7 +210,7 @@ export async function authMiddlewareLogout(req: Request, res: Response, next: Ne
     };
 
     next();
-  } catch (error) {
+  } catch {
     res.status(500).json({
       success: false,
       error: 'Kimlik doğrulama sırasında bir hata oluştu.',

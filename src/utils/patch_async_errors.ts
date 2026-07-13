@@ -15,11 +15,13 @@
 
 import { logger } from './logger';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 type Handler = (...args: any[]) => any;
 
 function applyPatch(): void {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // Kasıtlı dinamik require: express'in iç yolu bir sürümde değişirse/kaybolursa
+  // hata burada, applyPatch() içindeki try/catch tarafından yakalanabilsin diye
+  // (üstteki statik import'lar modül yüklenirken çalışır, bu try/catch'i atlar).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Layer = require('express/lib/router/layer');
 
   if (!Layer?.prototype) {

@@ -172,7 +172,7 @@ router.post('/', async (req: Request, res: Response) => {
       data,
       message: 'Değerlendirmeniz kaydedildi. Teşekkürler!',
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Değerlendirme sırasında hata oluştu.' });
   }
 });
@@ -214,7 +214,7 @@ router.get('/user/:userId', async (req: Request, res: Response) => {
         totalPages: Math.ceil((count || 0) / limit),
       },
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Değerlendirmeler alınırken hata oluştu.' });
   }
 });
@@ -259,7 +259,7 @@ router.get('/ride/:rideId', async (req: Request, res: Response) => {
     }
 
     res.json({ success: true, data: data || [] });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Değerlendirmeler alınırken hata oluştu.' });
   }
 });
