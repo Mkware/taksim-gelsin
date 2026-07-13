@@ -1,0 +1,1270 @@
+/**
+ * smart_matching.service.ts
+ *
+ * Profesyonel Sürücü Seçim Algoritması
+ *
+ * Mevcut sisteme DROP-IN replacement olarak tasarlanmıştır.
+ * Mevcut matching.service.ts'deki startMatching() fonksiyonunu
+ * bu servis ile değiştirmeniz yeterlidir.
+ *
+ * SKORLAMA AĞIRLIKLARI (skor hesaplaması için):
+ *   %30 → Mesafe, %25 günlük yolculuk, %25 rating, %20 kabul oranı
+ *
+ * KUYRUK SIRASI: Önce gerçek zamanlı çevrimiçi/müsait + başka çağrı kilidi yok.
+ * Ardından sıralama — önce en yakın (mesafe m); mesafe neredeyse eşitse skor.
+ *
+ * CEZA SİSTEMİ:
+ *   - Yanıt süresi dolunca timeout → kabul_oranı düşer (kalıcı etki) — süre admin `platform_settings`.
+ *   - Timeout cezası Redis'te TTL ile tutulur (geçici bant dışı)
+ *   - 3 art arda timeout → 10 dk bant dışı
+ */
+
+import { redis } from '../config/redis';
+import { supabaseAdmin } from '../config/supabase';
+import { getSocketManager } from '../sockets/socket.manager';
+import {
+  getDriverResponseTimeoutMs,
+  getPlatformSettings,
+  computeRideAcceptFeeTcoin,
+} from './platform_settings.service';
+import { notificationService } from './notification.service';
+import { notifyRideCancelledByFcm } from './push_notification.service';
+import { drivingMetersDriverToPickup } from './driving_distance.service';
+import { logger } from '../utils/logger';
+import { haversineDistance } from '../utils/distance';
+import { decodeEwkbPoint } from '../utils/geo';
+import {
+  driverOfferRedisTtlSecondsFromMs,
+  redisDriverResponseDeadlineKey,
+} from './matching_timeouts';
+
+// ─── Sabitler ────────────────────────────────────────────────────────────────
+
+const MAX_DRIVERS_PER_RIDE       = 5;
+const SEARCH_RADIUS_METERS       = 5_000;
+/** Ağ gecikmesi / son saniye kabul için sunucu timeout’u admin süresinden biraz uzun tutulur (UI deadline aynı). */
+const DRIVER_RESPONSE_END_GRACE_MS = 400;
+const QUEUE_TTL_S                = 300;
+const TIMEOUT_PENALTY_TTL_S      = 600;   // 10 dk bant dışı (3 art arda timeout)
+const CONSECUTIVE_TIMEOUT_LIMIT  = 3;     // kaç art arda timeout → bant dışı
+
+/** driver.handler ile aynı — canlı socket eşlemesi (hayalet çevrimiçi filtre) */
+const DRIVER_SOCKET_KEY = 'driver:socket:';
+/** Sürücü başına aktif teklif kilidi prefix'i (Lua içinde de kullanılır). */
+const DRIVER_PENDING_OFFER_PREFIX = 'driver:pending_offer:';
+
+// Ağırlıklar (toplam = 1.0)
+const WEIGHTS = {
+  distance      : 0.30,
+  dailyRides    : 0.25,
+  rating        : 0.25,
+  acceptanceRate: 0.20,
+} as const;
+
+// ─── Redis Anahtar Şablonları ─────────────────────────────────────────────────
+
+const REDIS_KEYS = {
+  matchingQueue    : (rideId: string) => `ride:matching:${rideId}`,
+  matchingQueuedTotal: (rideId: string) => `ride:matching:queued_total:${rideId}`,
+  matchingAskedCount : (rideId: string) => `ride:matching:asked:${rideId}`,
+  matchingCtx      : (rideId: string) => `ride:matching:ctx:${rideId}`,       // sweeper bağlamı (customer + pickup)
+  rejected         : (rideId: string) => `ride:rejected:${rideId}`,
+  pending          : (rideId: string) => `ride:pending:${rideId}`,
+  driverActiveOffer: (driverId: string) => `${DRIVER_PENDING_OFFER_PREFIX}${driverId}`,
+  driverStats      : (driverId: string) => `driver:stats:${driverId}`,       // günlük istatistik
+  driverPenalty    : (driverId: string) => `driver:penalty:${driverId}`,     // bant dışı flag
+  timeoutStreak    : (driverId: string) => `driver:timeout_streak:${driverId}`, // art arda timeout sayısı
+} as const;
+
+/**
+ * Dayanıklı teklif son tarihleri (deploy/restart'a dirençli).
+ *
+ * In-memory `setTimeout` süreç yeniden başlayınca kaybolur; bu yüzden her aktif
+ * teklifin bitiş zamanı (epoch ms) bu sorted set'te score olarak tutulur. `sweepExpiredOffers`
+ * süresi dolan teklifleri Redis'ten okuyup atomik claim ile sıradaki sürücüye ilerletir.
+ * Böylece in-memory timer kaybolsa bile eşleştirme saniyeler içinde devam eder.
+ */
+const OFFER_DEADLINES_ZSET = 'ride:offer:deadlines';
+const offerMember = (rideId: string, driverId: string): string => `${rideId}::${driverId}`;
+const parseOfferMember = (member: string): { rideId: string; driverId: string } | null => {
+  const idx = member.indexOf('::');
+  if (idx <= 0) return null;
+  return { rideId: member.slice(0, idx), driverId: member.slice(idx + 2) };
+};
+
+interface MatchingContext {
+  customerId: string;
+  pickupLat: number;
+  pickupLng: number;
+}
+
+// ─── Tip Tanımları ────────────────────────────────────────────────────────────
+
+interface NearbyDriver {
+  id          : string;
+  lat         : number;
+  lng         : number;
+  rating      : number;       // 1.0 – 5.0
+  rating_count: number;
+  distance_m  : number;       // pickup'a mesafe (metre)
+}
+
+/** RPC çıktısı — henüz yol mesafesi eklenmemiş aday */
+interface ParsedNearbyDriver {
+  id          : string;
+  lat         : number;
+  lng         : number;
+  rating      : number;
+  rating_count: number;
+}
+
+type ParsedWithAir = ParsedNearbyDriver & { air_m: number };
+
+interface DriverStats {
+  dailyRides    : number;   // bugün tamamlanan yolculuk
+  acceptanceRate: number;   // 0.0 – 1.0  (örn: 0.85 = %85)
+}
+
+interface ScoredDriver extends NearbyDriver {
+  stats       : DriverStats;
+  score       : number;           // 0 – 100 arası normalize skor
+  scoreBreakdown: {               // debug / gözlemlenebilirlik için
+    distance      : number;
+    dailyRides    : number;
+    rating        : number;
+    acceptanceRate: number;
+  };
+}
+
+// ─── Yardımcı: Normalizasyon ──────────────────────────────────────────────────
+
+/**
+ * Bir değer dizisini 0–1 arasına normalize eder.
+ * direction: 'asc'  → küçük değer yüksek skor (mesafe, günlük yolculuk)
+ *            'desc' → büyük değer yüksek skor (rating, kabul oranı)
+ */
+function normalize(value: number, min: number, max: number, direction: 'asc' | 'desc'): number {
+  if (max === min) return 1; // tek eleman varsa herkese tam puan
+  const ratio = (value - min) / (max - min);
+  return direction === 'asc' ? 1 - ratio : ratio;
+}
+
+// ─── Sürücü İstatistiklerini Yükle ───────────────────────────────────────────
+
+async function loadDriverStats(driverId: string): Promise<DriverStats> {
+  // Önce Redis cache'e bak (TTL gece yarısı sıfırlanır)
+  const cached = await redis.get(REDIS_KEYS.driverStats(driverId));
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached) as DriverStats;
+      if (Number.isFinite(parsed.dailyRides) && Number.isFinite(parsed.acceptanceRate)) {
+        return parsed;
+      }
+    } catch (e) {
+      // Bozuk cache → temizle ve DB'den yeniden yükle (eşleştirme bu yüzden patlamasın)
+      logger.warn(`[SmartMatching] driver stats cache bozuk, yeniden yükleniyor ${driverId}:`, e);
+      await redis.del(REDIS_KEYS.driverStats(driverId));
+    }
+  }
+
+  // Cache miss → DB'den çek
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const { data, error } = await supabaseAdmin
+    .from('rides')
+    .select('id', { count: 'exact' })
+    .eq('driver_id', driverId)
+    .eq('status', 'completed')
+    .gte('completed_at', today.toISOString());
+
+  if (error) {
+    logger.warn(`[SmartMatching] Driver stats fetch error: ${driverId}`, error);
+    return { dailyRides: 0, acceptanceRate: 0.8 }; // güvenli varsayılan
+  }
+
+  // Kabul oranı: son 30 yolculuk isteğindeki kabul / toplam istek
+  const { data: recentRequests } = await supabaseAdmin
+    .from('driver_request_log')        // ⚠️ Bu tabloyu oluşturmanız gerekiyor (aşağıda migration var)
+    .select('accepted')
+    .eq('driver_id', driverId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  const totalRequests = recentRequests?.length ?? 0;
+  const acceptedCount = recentRequests?.filter(r => r.accepted).length ?? 0;
+  const acceptanceRate = totalRequests > 0 ? acceptedCount / totalRequests : 0.8;
+
+  const stats: DriverStats = {
+    dailyRides    : data?.length ?? 0,
+    acceptanceRate,
+  };
+
+  // 5 dk cache (sık değişen veri)
+  await redis.setex(REDIS_KEYS.driverStats(driverId), 300, JSON.stringify(stats));
+
+  return stats;
+}
+
+// ─── Bant Dışı Kontrolü ───────────────────────────────────────────────────────
+
+async function isDriverBannedTemporarily(driverId: string): Promise<boolean> {
+  const penalty = await redis.get(REDIS_KEYS.driverPenalty(driverId));
+  return penalty !== null;
+}
+
+/**
+ * RPC anında dönen liste ile DB / Redis yarışını giderir:
+ * - DB'de hâlâ is_online + is_available olmayanları çıkarır
+ * - Başka bir yolculuk için aktif `pending_offer` kilidi olanları çıkarır (bu ride değilse)
+ * - Redis'te `driver:socket:{id}` yoksa çıkarır (DB online ama uygulama bağlı değil)
+ */
+async function filterCandidatesForRide(
+  drivers: NearbyDriver[],
+  rideId: string,
+): Promise<NearbyDriver[]> {
+  if (drivers.length === 0) return [];
+
+  const ids = [...new Set(drivers.map((d) => d.id))];
+
+  // Bu ride'ın kabul ücreti — yetersiz bakiyeli sürücüye boş teklif gitmesin.
+  let requiredBalance = 0;
+  try {
+    const { data: rideRow } = await supabaseAdmin
+      .from('rides')
+      .select('estimated_price')
+      .eq('id', rideId)
+      .maybeSingle();
+    requiredBalance = computeRideAcceptFeeTcoin(
+      Number((rideRow as { estimated_price?: number } | null)?.estimated_price ?? 0),
+    );
+  } catch (e) {
+    logger.warn(`[SmartMatching] kabul ücreti hesaplanamadı ride=${rideId}, bakiye filtresi atlandı:`, e);
+    requiredBalance = 0;
+  }
+
+  const { data: rows, error } = await supabaseAdmin
+    .from('drivers')
+    .select('id, balance')
+    .in('id', ids)
+    .eq('is_online', true)
+    .eq('is_available', true);
+
+  if (error) {
+    logger.warn('[SmartMatching] filterCandidates DB error:', error);
+    return drivers;
+  }
+
+  // Online + müsait + kabul ücretini karşılayacak bakiyesi olanlar.
+  const allowed = new Set(
+    (rows ?? [])
+      .filter((r) => Number((r as { balance?: number }).balance ?? 0) >= requiredBalance)
+      .map((r) => r.id as string),
+  );
+
+  const lockChecks = await Promise.all(
+    drivers.map(async (d): Promise<
+      | { d: NearbyDriver; keep: true }
+      | { d: NearbyDriver; keep: false; reason: 'db' | 'lock' | 'socket'; otherRide?: string }
+    > => {
+      if (!allowed.has(d.id)) {
+        return { d, keep: false, reason: 'db' };
+      }
+      const socketId = await redis.get(`${DRIVER_SOCKET_KEY}${d.id}`);
+      if (!socketId) {
+        return { d, keep: false, reason: 'socket' };
+      }
+      const lockedRide = await redis.get(REDIS_KEYS.driverActiveOffer(d.id));
+      if (lockedRide && lockedRide !== rideId) {
+        return { d, keep: false, reason: 'lock', otherRide: lockedRide };
+      }
+      return { d, keep: true };
+    }),
+  );
+
+  const out: NearbyDriver[] = [];
+  for (const c of lockChecks) {
+    if (c.keep) {
+      out.push(c.d);
+      continue;
+    }
+    if (c.reason === 'db') {
+      logger.info(`[SmartMatching] Candidate ${c.d.id} skipped — online/müsait değil veya kabul ücreti için yetersiz bakiye`);
+    } else if (c.reason === 'socket') {
+      logger.info(`[SmartMatching] Candidate ${c.d.id} skipped — no live socket (ghost online)`);
+    } else {
+      logger.info(
+        `[SmartMatching] Candidate ${c.d.id} skipped — pending offer for other ride ${c.otherRide}`,
+      );
+    }
+  }
+
+  return out;
+}
+
+// ─── Timeout Ceza Uygula ──────────────────────────────────────────────────────
+
+async function applyTimeoutPenalty(driverId: string): Promise<void> {
+  // Art arda timeout sayacını artır
+  const streakKey = REDIS_KEYS.timeoutStreak(driverId);
+  const streak    = await redis.incr(streakKey);
+  await redis.expire(streakKey, TIMEOUT_PENALTY_TTL_S);
+
+  logger.info(`[SmartMatching] Timeout streak for driver ${driverId}: ${streak}`);
+
+  if (streak >= CONSECUTIVE_TIMEOUT_LIMIT) {
+    // 3 art arda timeout → 10 dk bant dışı
+    await redis.setex(REDIS_KEYS.driverPenalty(driverId), TIMEOUT_PENALTY_TTL_S, '1');
+    await redis.del(streakKey);
+    logger.warn(`[SmartMatching] Driver ${driverId} temporarily banned for ${TIMEOUT_PENALTY_TTL_S}s`);
+  }
+
+  // Kabul oranını DB'ye düşür (kalıcı etki)
+  await supabaseAdmin.rpc('record_driver_request', {
+    p_driver_id: driverId,
+    p_accepted : false,
+    p_reason   : 'timeout',
+  });
+
+  // Stats cache'i geçersiz kıl
+  await redis.del(REDIS_KEYS.driverStats(driverId));
+}
+
+// ─── Ret Kaydı Uygula ─────────────────────────────────────────────────────────
+
+async function applyRejectionRecord(driverId: string): Promise<void> {
+  // Reddetme kabul oranını düşürür ama bant dışı yapmaz
+  await supabaseAdmin.rpc('record_driver_request', {
+    p_driver_id: driverId,
+    p_accepted : false,
+    p_reason   : 'rejected',
+  });
+
+  // Streak'i sıfırla (aktif ret = cevap verdi)
+  await redis.del(REDIS_KEYS.timeoutStreak(driverId));
+
+  // Stats cache'i geçersiz kıl
+  await redis.del(REDIS_KEYS.driverStats(driverId));
+}
+
+// ─── Kabul Kaydı ──────────────────────────────────────────────────────────────
+
+async function applyAcceptanceRecord(driverId: string): Promise<void> {
+  await supabaseAdmin.rpc('record_driver_request', {
+    p_driver_id: driverId,
+    p_accepted : true,
+    p_reason   : 'accepted',
+  });
+  await redis.del(REDIS_KEYS.timeoutStreak(driverId));
+  await redis.del(REDIS_KEYS.driverStats(driverId));
+}
+
+// ─── ANA SKORLAMA FONKSİYONU ──────────────────────────────────────────────────
+
+async function scoreAndRankDrivers(
+  drivers     : NearbyDriver[],
+  rejectedIds : Set<string>,
+): Promise<ScoredDriver[]> {
+
+  // Bant dışı ve ret listesi filtrele
+  const eligible: NearbyDriver[] = [];
+  for (const d of drivers) {
+    if (rejectedIds.has(d.id)) continue;
+    if (await isDriverBannedTemporarily(d.id)) {
+      logger.info(`[SmartMatching] Driver ${d.id} skipped (temporary ban)`);
+      continue;
+    }
+    eligible.push(d);
+  }
+
+  if (eligible.length === 0) return [];
+
+  // İstatistikleri paralel yükle
+  const statsArray = await Promise.all(eligible.map(d => loadDriverStats(d.id)));
+
+  // Normalize için min/max hesapla
+  const distances    = eligible.map(d => d.distance_m);
+  const dailyRides   = statsArray.map(s => s.dailyRides);
+  const ratings      = eligible.map(d => d.rating);
+  const acceptRates  = statsArray.map(s => s.acceptanceRate);
+
+  const minDist  = Math.min(...distances),    maxDist  = Math.max(...distances);
+  const minRides = Math.min(...dailyRides),   maxRides = Math.max(...dailyRides);
+  const minRate  = Math.min(...ratings),      maxRate  = Math.max(...ratings);
+  const minAcc   = Math.min(...acceptRates),  maxAcc   = Math.max(...acceptRates);
+
+  const scored: ScoredDriver[] = eligible.map((driver, i) => {
+    const stats = statsArray[i];
+
+    const breakdown = {
+      // Mesafe: az mesafe → yüksek skor (asc)
+      distance      : normalize(driver.distance_m,       minDist,  maxDist,  'asc'),
+      // Günlük yolculuk: az yolculuk → yüksek skor (asc) — adalet
+      dailyRides    : normalize(stats.dailyRides,        minRides, maxRides, 'asc'),
+      // Rating: yüksek puan → yüksek skor (desc)
+      rating        : normalize(driver.rating,           minRate,  maxRate,  'desc'),
+      // Kabul oranı: yüksek oran → yüksek skor (desc)
+      acceptanceRate: normalize(stats.acceptanceRate,    minAcc,   maxAcc,   'desc'),
+    };
+
+    const score = (
+      breakdown.distance       * WEIGHTS.distance       +
+      breakdown.dailyRides     * WEIGHTS.dailyRides     +
+      breakdown.rating         * WEIGHTS.rating         +
+      breakdown.acceptanceRate * WEIGHTS.acceptanceRate
+    ) * 100; // 0–100 arası
+
+    return { ...driver, stats, score, scoreBreakdown: breakdown };
+  });
+
+  // Önce mesafe (en yakın müşteriye) — taksi dağıtımında beklenen davranış.
+  // Mesafe pratikte eşit değilse skor ikincil; tam eşit mesafede skor.
+  scored.sort((a, b) => {
+    const distDiff = a.distance_m - b.distance_m;
+    if (Math.abs(distDiff) >= 1) {
+      return distDiff;
+    }
+    const byScore = b.score - a.score;
+    if (Math.abs(byScore) > 1e-6) {
+      return byScore;
+    }
+    return distDiff;
+  });
+
+  logger.info('[SmartMatching] Driver ranking:', scored.map(d => ({
+    id           : d.id,
+    score        : d.score.toFixed(1),
+    distance_m   : d.distance_m,
+    dailyRides   : d.stats.dailyRides,
+    rating       : d.rating,
+    acceptanceRate: (d.stats.acceptanceRate * 100).toFixed(0) + '%',
+  })));
+
+  return scored;
+}
+
+// ─── Müşteri: arama ilerlemesi (bekleme hissi azaltma) ───────────────────────
+
+async function notifyCustomerMatchingProgress(
+  rideId: string,
+  customerId: string,
+): Promise<void> {
+  const timeoutSec = getPlatformSettings().driverResponseTimeoutSeconds;
+  const [queuedTotalRaw, askedRaw, queueLen, pending, deadlineRaw] = await Promise.all([
+    redis.get(REDIS_KEYS.matchingQueuedTotal(rideId)),
+    redis.get(REDIS_KEYS.matchingAskedCount(rideId)),
+    redis.llen(REDIS_KEYS.matchingQueue(rideId)),
+    redis.get(REDIS_KEYS.pending(rideId)),
+    redis.get(redisDriverResponseDeadlineKey(rideId)),
+  ]);
+
+  const driversQueued = Math.max(0, Number(queuedTotalRaw) || 0);
+  const driversAsked = Math.max(0, Number(askedRaw) || 0);
+  const driversRemainingInQueue = Math.max(0, Number(queueLen) || 0);
+
+  let currentOfferSecondsLeft: number | undefined;
+  if (pending) {
+    const deadline = deadlineRaw != null ? Number(deadlineRaw) : NaN;
+    if (Number.isFinite(deadline)) {
+      currentOfferSecondsLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    } else {
+      currentOfferSecondsLeft = timeoutSec;
+    }
+  }
+
+  const currentLeft = currentOfferSecondsLeft ?? 0;
+  const maxWaitSeconds = currentLeft + driversRemainingInQueue * timeoutSec;
+
+  try {
+    const io = getSocketManager();
+    io.to(`customer:${customerId}`).emit('ride:matching_progress', {
+      rideId,
+      driversQueued,
+      driversAsked,
+      driversRemainingInQueue,
+      maxWaitSeconds,
+      ...(currentOfferSecondsLeft != null ? { currentOfferSecondsLeft } : {}),
+      driverResponseTimeoutSeconds: timeoutSec,
+    });
+  } catch (e) {
+    logger.warn(`[SmartMatching] matching_progress emit hata ride=${rideId}:`, e);
+  }
+}
+
+// ─── ANA EŞLEŞTİRME FONKSİYONU ───────────────────────────────────────────────
+
+export async function startSmartMatching(
+  rideId     : string,
+  pickupLat  : number,
+  pickupLng  : number,
+  customerId : string,
+): Promise<void> {
+
+  logger.info(`[SmartMatching] Starting for ride ${rideId}`);
+
+  // Sweeper bağlamı (customer + pickup) — restart sonrası bu sayede ilerlenebilir.
+  await saveMatchingContext(rideId, { customerId, pickupLat, pickupLng });
+
+  // 1. Yakındaki sürücüleri bul
+  const { data: nearbyRaw, error } = await supabaseAdmin.rpc('find_nearby_drivers', {
+    lat           : pickupLat,
+    lng           : pickupLng,
+    radius_meters : SEARCH_RADIUS_METERS,
+    max_results   : 20, // havada ön seçim + Matrix ile daraltılır
+  });
+
+  if (error || !nearbyRaw?.length) {
+    logger.warn(`[SmartMatching] No nearby drivers for ride ${rideId}`);
+    await handleNoDriversAvailable(rideId, customerId);
+    return;
+  }
+
+  // PostGIS / RPC ile kuş uçumu çemberinden adaylar — sıralama için yol mesafesi (Distance Matrix + fallback Haversine)
+  const parsed: ParsedNearbyDriver[] = nearbyRaw.map((d: Record<string, unknown>) => {
+    const id = String(d.id ?? d.driver_id ?? '');
+    const lat = Number(d.lat ?? d.lat_out ?? 0);
+    const lng = Number(d.lng ?? d.lng_out ?? 0);
+    return {
+      id,
+      lat,
+      lng,
+      rating      : Number(d.rating ?? 5.0),
+      rating_count: Number(d.rating_count ?? 0),
+    };
+  });
+
+  // Önce kuş uçumuna göre sırala — Google Matrix yalnızca en yakın N adaya (maliyet ↓, performans ↑)
+  const withAir: ParsedWithAir[] = parsed.map((p) => ({
+    ...p,
+    air_m: haversineDistance(pickupLat, pickupLng, p.lat, p.lng) * 1000,
+  }));
+  withAir.sort((a, b) => a.air_m - b.air_m);
+  const preselected = withAir.slice(0, getPlatformSettings().matchingRoadMatrixMaxDrivers);
+
+  const drivingMeters = await drivingMetersDriverToPickup(
+    pickupLat,
+    pickupLng,
+    preselected.map((p) => ({ lat: p.lat, lng: p.lng })),
+  );
+
+  const nearby: NearbyDriver[] = preselected.map((p, i) => ({
+    id: p.id,
+    lat: p.lat,
+    lng: p.lng,
+    rating: p.rating,
+    rating_count: p.rating_count,
+    distance_m:
+      drivingMeters[i] ??
+      haversineDistance(pickupLat, pickupLng, p.lat, p.lng) * 1000,
+  }));
+
+  const nearbyEligible = await filterCandidatesForRide(nearby, rideId);
+  if (nearbyEligible.length === 0) {
+    logger.warn(`[SmartMatching] No eligible drivers after DB/Redis filter for ride ${rideId}`);
+    await handleNoDriversAvailable(rideId, customerId);
+    return;
+  }
+
+  // 2. Reddeden sürücüleri Redis'ten yükle
+  const rejectedRaw = await redis.smembers(REDIS_KEYS.rejected(rideId));
+  const rejectedIds = new Set(rejectedRaw);
+
+  // 3. Skor hesapla ve sırala (kuyruk: en yakın önce)
+  const ranked = await scoreAndRankDrivers(nearbyEligible, rejectedIds);
+
+  if (ranked.length === 0) {
+    await handleNoDriversAvailable(rideId, customerId);
+    return;
+  }
+
+  // 4. En iyi MAX_DRIVERS_PER_RIDE sürücüyü Redis LIST olarak yaz (LPOP = atomik sıra)
+  const queue = ranked.slice(0, MAX_DRIVERS_PER_RIDE).map(d => d.id);
+  const qKey = REDIS_KEYS.matchingQueue(rideId);
+  await redis.del(qKey);
+  if (queue.length > 0) {
+    await redis.rpush(qKey, ...queue);
+    await redis.expire(qKey, QUEUE_TTL_S);
+  }
+
+  await redis.setex(REDIS_KEYS.matchingQueuedTotal(rideId), QUEUE_TTL_S, String(queue.length));
+  await redis.del(REDIS_KEYS.matchingAskedCount(rideId));
+  await notifyCustomerMatchingProgress(rideId, customerId);
+
+  // 5. İlk sürücüye gönder
+  await sendRequestToNextDriver(rideId, customerId, pickupLat, pickupLng);
+}
+
+/**
+ * Eski STRING+JSON kuyruğunu LIST'e migrate eder (yalnızca deploy geçişi artığı için).
+ * startSmartMatching her zaman LIST üretir; bu yalnızca eski sürümden kalan ride'lar içindir.
+ */
+async function ensureListQueue(rideId: string): Promise<void> {
+  const key = REDIS_KEYS.matchingQueue(rideId);
+  const t = await redis.type(key);
+  if (t === 'string') {
+    const raw = await redis.get(key);
+    await redis.del(key);
+    if (raw) {
+      try {
+        const arr = JSON.parse(raw) as unknown;
+        if (Array.isArray(arr) && arr.length > 0) {
+          await redis.rpush(key, ...arr.map((x) => String(x)));
+          await redis.expire(key, QUEUE_TTL_S);
+        }
+      } catch {
+        // bozuk eski kuyruk — boş bırak (handleNoDriversAvailable devreye girer)
+      }
+    }
+  }
+}
+
+/**
+ * Atomik sürücü devralma — pop + canlı socket kontrolü + offer kilidi (NX) + pending +
+ * UI deadline + dayanıklı ZSET son tarihi TEK Lua script'inde yapılır.
+ *
+ * Önceki kod LPOP ile SET NX'i ayrı komutlarda çalıştırıyordu; arada NX başarısız olunca
+ * sürücü kuyruktan düşer ve geri eklenmezdi (havuz erimesi) ya da iki paralel akış aynı
+ * sürücüye teklif gönderebilirdi. Bu Lua o yarışları tamamen ortadan kaldırır.
+ *
+ * @returns atanan driverId, veya kuyrukta uygun sürücü kalmadıysa null.
+ */
+const ACQUIRE_NEXT_DRIVER_LUA = `
+  local queueKey = KEYS[1]
+  local pendingKey = KEYS[2]
+  local deadlineKey = KEYS[3]
+  local zsetKey = KEYS[4]
+  local socketPrefix = ARGV[1]
+  local offerPrefix = ARGV[2]
+  local rideId = ARGV[3]
+  local ttl = tonumber(ARGV[4])
+  local uiDeadlineMs = ARGV[5]
+  local queueTtl = tonumber(ARGV[6])
+  local sweepScoreMs = tonumber(ARGV[7])
+  while true do
+    local driverId = redis.call('LPOP', queueKey)
+    if not driverId then
+      return false
+    end
+    local hasSocket = redis.call('GET', socketPrefix .. driverId)
+    if hasSocket then
+      local locked = redis.call('SET', offerPrefix .. driverId, rideId, 'EX', ttl, 'NX')
+      if locked then
+        redis.call('SET', pendingKey, driverId, 'EX', ttl)
+        redis.call('SET', deadlineKey, uiDeadlineMs, 'EX', ttl)
+        redis.call('ZADD', zsetKey, sweepScoreMs, rideId .. '::' .. driverId)
+        if redis.call('LLEN', queueKey) > 0 then
+          redis.call('EXPIRE', queueKey, queueTtl)
+        end
+        return driverId
+      end
+    end
+  end
+`;
+
+async function acquireNextDriver(
+  rideId: string,
+  ttlSeconds: number,
+  uiDeadlineMs: number,
+  sweepScoreMs: number,
+): Promise<string | null> {
+  await ensureListQueue(rideId);
+  try {
+    const res = (await redis.eval(
+      ACQUIRE_NEXT_DRIVER_LUA,
+      4,
+      REDIS_KEYS.matchingQueue(rideId),
+      REDIS_KEYS.pending(rideId),
+      redisDriverResponseDeadlineKey(rideId),
+      OFFER_DEADLINES_ZSET,
+      DRIVER_SOCKET_KEY,
+      DRIVER_PENDING_OFFER_PREFIX,
+      rideId,
+      String(ttlSeconds),
+      String(uiDeadlineMs),
+      String(QUEUE_TTL_S),
+      String(sweepScoreMs),
+    )) as string | number | null;
+    if (!res || res === '' || res === 0) return null;
+    return String(res);
+  } catch (e) {
+    logger.error(`[SmartMatching] acquireNextDriver Lua hatası ride=${rideId}:`, e);
+    return null;
+  }
+}
+
+/** Teklif gönderilemediğinde (offline/çevrimdışı) ayrılan tüm kilitleri serbest bırak. */
+async function releaseOffer(rideId: string, driverId: string): Promise<void> {
+  await Promise.all([
+    redis.del(REDIS_KEYS.pending(rideId)),
+    redis.del(REDIS_KEYS.driverActiveOffer(driverId)),
+    redis.del(redisDriverResponseDeadlineKey(rideId)),
+    redis.zrem(OFFER_DEADLINES_ZSET, offerMember(rideId, driverId)),
+  ]);
+}
+
+// ─── Eşleştirme Bağlamı (sweeper için kalıcı customer + pickup) ───────────────
+
+async function saveMatchingContext(rideId: string, ctx: MatchingContext): Promise<void> {
+  try {
+    await redis.setex(REDIS_KEYS.matchingCtx(rideId), QUEUE_TTL_S, JSON.stringify(ctx));
+  } catch (e) {
+    logger.warn(`[SmartMatching] matching ctx yazılamadı ride=${rideId}:`, e);
+  }
+}
+
+async function loadMatchingContext(rideId: string): Promise<MatchingContext | null> {
+  const raw = await redis.get(REDIS_KEYS.matchingCtx(rideId));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as MatchingContext;
+    if (
+      typeof parsed.customerId === 'string' &&
+      Number.isFinite(parsed.pickupLat) &&
+      Number.isFinite(parsed.pickupLng)
+    ) {
+      return parsed;
+    }
+  } catch {
+    // bozuk cache — DB fallback kullanılır
+  }
+  return null;
+}
+
+/** Redis bağlamı yoksa (örn. restart sonrası TTL düştü) DB'den çöz — yalnızca hâlâ searching ise. */
+async function fetchContextFromDb(rideId: string): Promise<MatchingContext | null> {
+  try {
+    const { data } = await supabaseAdmin
+      .from('rides')
+      .select('customer_id, pickup_location, status')
+      .eq('id', rideId)
+      .maybeSingle();
+    if (!data) return null;
+    if ((data.status as string | undefined) !== 'searching') return null;
+    const pt = decodeEwkbPoint((data as { pickup_location?: unknown }).pickup_location);
+    if (!pt) return null;
+    return { customerId: String(data.customer_id), pickupLat: pt.lat, pickupLng: pt.lng };
+  } catch (e) {
+    logger.warn(`[SmartMatching] fetchContextFromDb hata ride=${rideId}:`, e);
+    return null;
+  }
+}
+
+// ─── Atomik Pending Devralma (Lua) ────────────────────────────────────────────
+
+/**
+ * Pending sürücü hâlâ verilen driverId ise: tüm ilgili anahtarları sil ve "1" döndür.
+ * Aksi halde "0" döndür ve hiçbir şeye dokunma.
+ *
+ * Bu sayede timeout callback'i ile ride:accept yarışı kazansa bile yalnızca biri
+ * "stillPending" görür — yani çift sıradaki sürücüye offer / çift wallet hareketi olmaz.
+ */
+const CLAIM_TIMEOUT_LUA = `
+  local pending = redis.call('GET', KEYS[1])
+  if pending == ARGV[1] then
+    redis.call('DEL', KEYS[1])
+    redis.call('DEL', KEYS[2])
+    redis.call('DEL', KEYS[3])
+    redis.call('ZREM', KEYS[4], ARGV[2])
+    return 1
+  end
+  return 0
+`;
+
+async function claimTimeoutSlot(
+  rideId: string,
+  driverId: string,
+): Promise<boolean> {
+  try {
+    const res = (await redis.eval(
+      CLAIM_TIMEOUT_LUA,
+      4,
+      REDIS_KEYS.pending(rideId),
+      REDIS_KEYS.driverActiveOffer(driverId),
+      redisDriverResponseDeadlineKey(rideId),
+      OFFER_DEADLINES_ZSET,
+      driverId,
+      offerMember(rideId, driverId),
+    )) as number | string;
+    return Number(res) === 1;
+  } catch (e) {
+    logger.warn('[SmartMatching] claimTimeoutSlot Lua hatası:', e);
+    // Lua kullanılamazsa eski yola dön; çağıran taraf yine de güvenli iş yapar
+    const stillPending = await redis.get(REDIS_KEYS.pending(rideId));
+    if (stillPending !== driverId) return false;
+    await Promise.all([
+      redis.del(REDIS_KEYS.pending(rideId)),
+      redis.del(REDIS_KEYS.driverActiveOffer(driverId)),
+      redis.del(redisDriverResponseDeadlineKey(rideId)),
+      redis.zrem(OFFER_DEADLINES_ZSET, offerMember(rideId, driverId)),
+    ]);
+    return true;
+  }
+}
+
+// ─── Eşleştirme Dağıtık Lock ──────────────────────────────────────────────────
+
+const MATCHING_LOCK_TTL_S = 15;
+const matchingLockKey = (rideId: string) => `ride:matching:lock:${rideId}`;
+/** Lock başka bir akışta tutuluyorsa kısa aralıklarla yeniden dene (sessiz drop = takılma riski). */
+const LOCK_MAX_ATTEMPTS = 25;
+const LOCK_RETRY_DELAY_MS = 150;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * sendRequestToNextDriver'ın eş zamanlı çağrılmasını serileştirir.
+ * Aynı ride için iki paralel çağrı (timeout + rejection) aynı sürücüye çift offer göndermesin.
+ *
+ * ÖNEMLİ: Lock alınamazsa SESSİZCE return ETMEZ — kısa aralıklarla yeniden dener. Aksi halde
+ * gerçekten gerekli olan "sıradaki sürücüye geç" ilerlemesi düşebilir ve yolculuk searching'de
+ * takılırdı. Çağıran taraf zaten claimTimeoutSlot ile tek kazanan olduğundan, retry çift offer
+ * üretmez; yalnızca tek gerçek ilerlemenin çalışmasını garanti eder.
+ */
+async function withMatchingLock(rideId: string, fn: () => Promise<void>): Promise<void> {
+  const lockKey = matchingLockKey(rideId);
+  for (let attempt = 1; attempt <= LOCK_MAX_ATTEMPTS; attempt++) {
+    const acquired = await redis.set(lockKey, '1', 'EX', MATCHING_LOCK_TTL_S, 'NX');
+    if (acquired) {
+      try {
+        await fn();
+      } finally {
+        await redis.del(lockKey);
+      }
+      return;
+    }
+    if (attempt < LOCK_MAX_ATTEMPTS) {
+      await sleep(LOCK_RETRY_DELAY_MS);
+    }
+  }
+  // Buraya gelinmesi olağan dışı; sweeper bir sonraki turda yine de kurtarır.
+  logger.warn(
+    `[SmartMatching] matching lock ${LOCK_MAX_ATTEMPTS} denemede alınamadı ride=${rideId} — sweeper kurtarmaya bırakıldı`,
+  );
+}
+
+// ─── Sıradaki Sürücüye Gönder ─────────────────────────────────────────────────
+
+async function sendRequestToNextDriver(
+  rideId    : string,
+  customerId: string,
+  pickupLat : number,
+  pickupLng : number,
+): Promise<void> {
+  return withMatchingLock(rideId, () => _sendRequestToNextDriverInner(rideId, customerId, pickupLat, pickupLng));
+}
+
+async function _sendRequestToNextDriverInner(
+  rideId    : string,
+  customerId: string,
+  pickupLat : number,
+  pickupLng : number,
+): Promise<void> {
+
+  const driverTimeoutMs = getDriverResponseTimeoutMs();
+  const serverTimeoutMs = driverTimeoutMs + DRIVER_RESPONSE_END_GRACE_MS;
+  const offerLockTtlSeconds = driverOfferRedisTtlSecondsFromMs(serverTimeoutMs);
+
+  // Bağlamı (customer + pickup) tazele; sweeper restart sonrası buradan ilerler.
+  await saveMatchingContext(rideId, { customerId, pickupLat, pickupLng });
+
+  while (true) {
+    // UI deadline = admin yanıt süresi; sweeper deadline'ı tampon kadar sonra
+    // (in-memory timer önce ateşlensin, sweeper yalnızca timer kaybolursa devreye girsin).
+    const uiDeadlineMs = Date.now() + driverTimeoutMs;
+    const sweepScoreMs = Date.now() + serverTimeoutMs;
+
+    // Atomik devralma: pop + socket kontrolü + offer kilidi + pending + deadline + ZSET.
+    const driverId = await acquireNextDriver(rideId, offerLockTtlSeconds, uiDeadlineMs, sweepScoreMs);
+    if (!driverId) {
+      await handleNoDriversAvailable(rideId, customerId);
+      return;
+    }
+
+    // Yarış / stale kuyruk: DB artık çevrimdışıysa bildirim gitmez; kilitleri bırakıp sıradakine geç.
+    const delivered = await notificationService.sendRideRequest(driverId, rideId);
+    if (!delivered) {
+      logger.info(
+        `[SmartMatching] İstek gönderilemedi (çevrimdışı / müsait değil), kilit temizleniyor: ${driverId} ride=${rideId}`,
+      );
+      await releaseOffer(rideId, driverId);
+      continue;
+    }
+
+    logger.info(`[SmartMatching] Request sent to driver ${driverId} for ride ${rideId}`);
+
+    await redis.incr(REDIS_KEYS.matchingAskedCount(rideId));
+    await redis.expire(REDIS_KEYS.matchingAskedCount(rideId), QUEUE_TTL_S);
+    await notifyCustomerMatchingProgress(rideId, customerId);
+
+    // Hızlı yol: in-memory timer süre dolunca ilerletir. Süreç restart olursa bu timer
+    // kaybolur AMA ZSET son tarihi Redis'te kalır ve sweeper kurtarır.
+    scheduleOfferTimeout(rideId, driverId, customerId, pickupLat, pickupLng, serverTimeoutMs);
+
+    return; // Bu iterasyonda sürücüye gönderildi, döngüden çık
+  }
+}
+
+// ─── Teklif Timeout: in-memory hızlı yol + sweeper paylaşımlı işleme ───────────
+
+function offerTimeoutHandleKey(rideId: string, driverId: string): string {
+  return `timeout:${rideId}:${driverId}`;
+}
+
+function scheduleOfferTimeout(
+  rideId    : string,
+  driverId  : string,
+  customerId: string,
+  pickupLat : number,
+  pickupLng : number,
+  serverTimeoutMs: number,
+): void {
+  const timeoutHandle = setTimeout(() => {
+    void handleOfferTimeout(rideId, driverId, customerId, pickupLat, pickupLng);
+  }, serverTimeoutMs);
+  (global as unknown as Record<string, ReturnType<typeof setTimeout>>)[
+    offerTimeoutHandleKey(rideId, driverId)
+  ] = timeoutHandle;
+}
+
+/**
+ * Bir teklifin süresi dolunca: atomik claim (kabul/iptal/diğer akışla yarışta tek kazanan),
+ * ceza ve sıradaki sürücüye ilerleme. Hem in-memory timer hem sweeper bunu çağırır;
+ * claim sayesinde aynı teklif yalnızca bir kez ilerletilir.
+ */
+async function handleOfferTimeout(
+  rideId    : string,
+  driverId  : string,
+  customerId: string,
+  pickupLat : number,
+  pickupLng : number,
+): Promise<void> {
+  try {
+    const claimed = await claimTimeoutSlot(rideId, driverId);
+    if (!claimed) {
+      logger.info(
+        `[SmartMatching] Timeout claim kaybedildi (kabul/iptal/diğer akış kazandı) ride=${rideId} driver=${driverId}`,
+      );
+      return;
+    }
+
+    logger.warn(`[SmartMatching] Driver ${driverId} timed out for ride ${rideId}`);
+
+    try {
+      await applyTimeoutPenalty(driverId);
+    } catch (penaltyErr) {
+      logger.warn(`[SmartMatching] applyTimeoutPenalty hata ${driverId}:`, penaltyErr);
+    }
+
+    await notifyCustomerMatchingProgress(rideId, customerId);
+    await sendRequestToNextDriver(rideId, customerId, pickupLat, pickupLng);
+  } catch (timerErr) {
+    logger.error(`[SmartMatching] offer timeout işleme hata ride=${rideId} driver=${driverId}:`, timerErr);
+  }
+}
+
+// ─── Dayanıklı Teklif Sweeper (deploy/restart kurtarması) ─────────────────────
+
+let offerSweeperHandle: NodeJS.Timeout | null = null;
+const OFFER_SWEEP_INTERVAL_MS = 2000;
+const OFFER_SWEEP_BATCH = 50;
+
+/**
+ * Süresi dolmuş tüm teklifleri Redis ZSET'inden okuyup atomik olarak sıradaki sürücüye
+ * ilerletir. In-memory timer'lar süreç restart'ında kaybolsa bile bu döngü eşleştirmeyi
+ * birkaç saniye içinde devam ettirir — yolculuk artık "searching"de takılmaz.
+ */
+export async function sweepExpiredOffersOnce(): Promise<number> {
+  let members: string[] = [];
+  try {
+    members = await redis.zrangebyscore(OFFER_DEADLINES_ZSET, 0, Date.now(), 'LIMIT', 0, OFFER_SWEEP_BATCH);
+  } catch (e) {
+    logger.error('[SmartMatching][sweeper] zrangebyscore hata:', e);
+    return 0;
+  }
+  if (members.length === 0) return 0;
+
+  let handled = 0;
+  for (const member of members) {
+    try {
+      const parsed = parseOfferMember(member);
+      if (!parsed) {
+        await redis.zrem(OFFER_DEADLINES_ZSET, member);
+        continue;
+      }
+      const { rideId, driverId } = parsed;
+
+      const claimed = await claimTimeoutSlot(rideId, driverId);
+      if (!claimed) {
+        // Başka akış (in-memory timer / kabul / iptal) zaten ele aldı.
+        await redis.zrem(OFFER_DEADLINES_ZSET, member);
+        continue;
+      }
+
+      handled++;
+      logger.warn(`[SmartMatching][sweeper] Süresi dolan teklif kurtarıldı ride=${rideId} driver=${driverId}`);
+
+      try {
+        await applyTimeoutPenalty(driverId);
+      } catch (penaltyErr) {
+        logger.warn(`[SmartMatching][sweeper] applyTimeoutPenalty hata ${driverId}:`, penaltyErr);
+      }
+
+      const ctx = (await loadMatchingContext(rideId)) ?? (await fetchContextFromDb(rideId));
+      if (!ctx) {
+        logger.warn(
+          `[SmartMatching][sweeper] ride=${rideId} bağlam çözülemedi (artık searching değil olabilir) — atlanıyor`,
+        );
+        continue;
+      }
+
+      await notifyCustomerMatchingProgress(rideId, ctx.customerId);
+      await sendRequestToNextDriver(rideId, ctx.customerId, ctx.pickupLat, ctx.pickupLng);
+    } catch (e) {
+      logger.error(`[SmartMatching][sweeper] üye işleme hata member=${member}:`, e);
+    }
+  }
+  return handled;
+}
+
+export function initOfferSweeper(): void {
+  if (offerSweeperHandle) return;
+  offerSweeperHandle = setInterval(() => {
+    void sweepExpiredOffersOnce();
+  }, OFFER_SWEEP_INTERVAL_MS);
+  logger.info(`[SmartMatching] dayanıklı teklif sweeper aktif (her ${OFFER_SWEEP_INTERVAL_MS} ms)`);
+}
+
+export function stopOfferSweeper(): void {
+  if (offerSweeperHandle) {
+    clearInterval(offerSweeperHandle);
+    offerSweeperHandle = null;
+    logger.info('[SmartMatching] teklif sweeper durduruldu.');
+  }
+}
+
+// ─── Ret İşleme ───────────────────────────────────────────────────────────────
+
+export async function handleSmartRejection(
+  rideId    : string,
+  driverId  : string,
+  customerId: string,
+  pickupLat : number,
+  pickupLng : number,
+): Promise<void> {
+  logger.info(`[SmartMatching] Driver ${driverId} rejected ride ${rideId}`);
+
+  // Timeout'u iptal et (callback zaten kuyrukta olabilir; Lua claim koruması son hattır)
+  clearTimeout(
+    (global as unknown as Record<string, ReturnType<typeof setTimeout>>)[
+      offerTimeoutHandleKey(rideId, driverId)
+    ],
+  );
+
+  // Reddedenler setine ekle (yeniden teklif gitmesin)
+  await redis.sadd(REDIS_KEYS.rejected(rideId), driverId);
+  await redis.expire(REDIS_KEYS.rejected(rideId), QUEUE_TTL_S);
+
+  // Atomik olarak pending slot'unu devral — başka bir akış (timeout/kabul) henüz
+  // ele almadıysa "1" gelir ve aynı anda tüm anahtarları siler.
+  const claimed = await claimTimeoutSlot(rideId, driverId);
+  if (!claimed) {
+    // Claim kaybedildi → bu teklifi başka bir akış (timeout/kabul) zaten işledi.
+    // ÇİFT CEZA ve ÇİFT İLERLEME olmasın diye burada applyRejectionRecord / sendRequestToNextDriver ÇAĞIRMA.
+    logger.info(
+      `[SmartMatching] Ret claim kaybedildi (timeout/kabul önceden işledi) ride=${rideId} driver=${driverId} — ilerleme atlanıyor`,
+    );
+    return;
+  }
+
+  // Ret kaydı (kabul oranını düşürür) — yalnızca claim kazanıldıysa
+  try {
+    await applyRejectionRecord(driverId);
+  } catch (e) {
+    logger.warn(`[SmartMatching] applyRejectionRecord hata ${driverId}:`, e);
+  }
+
+  await notifyCustomerMatchingProgress(rideId, customerId);
+  // Sıradakine geç — withMatchingLock zaten paralel çağrıları serileştirir
+  await sendRequestToNextDriver(rideId, customerId, pickupLat, pickupLng);
+}
+
+// ─── Sürücü Offline/Disconnect: Bekleyen Teklifi Terk Et ──────────────────────
+
+/**
+ * Sürücü çevrimdışı olur / socket koparsa, o sürücüye gönderilmiş bekleyen teklif varsa
+ * ZSET deadline'ını beklemeden hemen sıradaki sürücüye geç. Aksi halde müşteri, çevrimdışı
+ * bir sürücünün yanıt süresi dolana kadar boşuna beklerdi.
+ *
+ * Ceza UYGULANMAZ — çevrimdışı olmak (özellikle ağ kopması) bir "ret" değildir.
+ */
+export async function handleDriverOfflineAbandon(driverId: string): Promise<void> {
+  let rideId: string | null = null;
+  try {
+    rideId = await redis.get(REDIS_KEYS.driverActiveOffer(driverId));
+  } catch (e) {
+    logger.warn(`[SmartMatching] offline-abandon offer okuma hata ${driverId}:`, e);
+    return;
+  }
+  if (!rideId) return;
+
+  // Bu sürücü hâlâ bu ride'ın pending'i mi? Atomik claim ile devral.
+  const claimed = await claimTimeoutSlot(rideId, driverId);
+  if (!claimed) {
+    // Pending değil (kabul/iptal/başka akış); kalan offer kilidini güvenle temizle.
+    await redis.del(REDIS_KEYS.driverActiveOffer(driverId));
+    return;
+  }
+
+  clearTimeout(
+    (global as unknown as Record<string, ReturnType<typeof setTimeout>>)[
+      offerTimeoutHandleKey(rideId, driverId)
+    ],
+  );
+
+  logger.warn(
+    `[SmartMatching] Sürücü offline/disconnect — bekleyen teklif terk edildi, sıradakine geçiliyor ride=${rideId} driver=${driverId}`,
+  );
+
+  const ctx = (await loadMatchingContext(rideId)) ?? (await fetchContextFromDb(rideId));
+  if (!ctx) {
+    logger.warn(`[SmartMatching] offline-abandon bağlam çözülemedi ride=${rideId} — atlanıyor`);
+    return;
+  }
+  await notifyCustomerMatchingProgress(rideId, ctx.customerId);
+  await sendRequestToNextDriver(rideId, ctx.customerId, ctx.pickupLat, ctx.pickupLng);
+}
+
+// ─── Kabul İşleme ─────────────────────────────────────────────────────────────
+
+export async function handleSmartAcceptance(rideId: string, driverId: string): Promise<void> {
+  // Timeout'u hemen iptal et ki yarış durumu oluşmasın
+  clearTimeout(
+    (global as unknown as Record<string, ReturnType<typeof setTimeout>>)[
+      offerTimeoutHandleKey(rideId, driverId)
+    ],
+  );
+
+  try {
+    await applyAcceptanceRecord(driverId);
+  } catch (e) {
+    logger.warn(`[SmartMatching] applyAcceptanceRecord hata ${driverId}:`, e);
+  }
+
+  // Atomik olarak pending'i temizle — timeout callback'i fırlamış olsa da
+  // "pending == driverId" görmeyecek ve sıradakine offer göndermeyecek.
+  await claimTimeoutSlot(rideId, driverId);
+}
+
+// ─── Sürücü Bulunamadı ────────────────────────────────────────────────────────
+
+async function handleNoDriversAvailable(rideId: string, customerId: string): Promise<void> {
+  logger.warn(`[SmartMatching] No drivers available for ride ${rideId}`);
+  await redis.del(REDIS_KEYS.matchingQueuedTotal(rideId));
+  await redis.del(REDIS_KEYS.matchingAskedCount(rideId));
+  await notifyCustomerMatchingProgress(rideId, customerId);
+
+  // Yalnızca hâlâ "searching" + atanmış sürücü yokken iptal et.
+  // rideService.updateRideStatus(müşteri cancelled) accepted→cancelled izin verir;
+  // timeout ile geç kabul yarışında yanlışlıkla kabulü silip T Coin iadesi tetiklenmesin.
+  const nowIso = new Date().toISOString();
+  const { data: cancelledRow, error: cancelErr } = await supabaseAdmin
+    .from('rides')
+    .update({
+      status: 'cancelled',
+      cancelled_at: nowIso,
+      cancel_reason: 'Yakında müsait sürücü bulunamadı.',
+    })
+    .eq('id', rideId)
+    .eq('customer_id', customerId)
+    .eq('status', 'searching')
+    .is('driver_id', null)
+    .select('id')
+    .maybeSingle();
+
+  if (cancelErr) {
+    logger.warn(
+      `[SmartMatching] searching→cancelled (no_driver) atomik güncelleme hata ride=${rideId}:`,
+      cancelErr.message,
+    );
+    await clearSmartMatchingQueue(rideId, false);
+    return;
+  }
+
+  if (!cancelledRow) {
+    const { data: cur } = await supabaseAdmin
+      .from('rides')
+      .select('status')
+      .eq('id', rideId)
+      .maybeSingle();
+    logger.info(
+      `[SmartMatching] handleNoDrivers atlandı — yolculuk artık searching değil (status=${cur?.status ?? 'bilinmiyor'}) ride=${rideId}`,
+    );
+    await clearSmartMatchingQueue(rideId, false);
+    return;
+  }
+
+  logger.info(`Yolculuk güncellendi: ${rideId}, searching → cancelled (müsait sürücü yok)`);
+  await notifyCustomerMatchingProgress(rideId, customerId);
+  await clearSmartMatchingQueue(rideId, true, 'no_driver');
+  const io = getSocketManager();
+  io.to(`customer:${customerId}`).emit('ride:no_driver_found', { rideId });
+  void notifyRideCancelledByFcm({
+    rideId,
+    customerId,
+    scenario: 'system',
+    systemBody: 'Yakında müsait sürücü bulunamadı; talep kapatıldı.',
+  }).catch((e: unknown) => logger.warn('[FCM] no_driver push:', e));
+}
+
+// ─── Kuyruk Temizle (İptal) ───────────────────────────────────────────────────
+
+/** Redis eşleştirme anahtarlarını siler. [notifyPendingDriver]: `ride:pending` sürücüsüne
+ *  `ride:request_cancelled` gider — başarılı kabul sonrası `accepted_by_other` ile **false**
+ *  kullan (pending zaten kazanan; aksi halde "başka sürücü kabul etti" yanlış gider). */
+export async function clearSmartMatchingQueue(
+  rideId            : string,
+  notifyPendingDriver: boolean,
+  cancelReason:
+    | 'customer_cancelled'
+    | 'no_driver'
+    | 'accepted_by_other' = 'customer_cancelled',
+): Promise<void> {
+  const pendingDriverId = await redis.get(REDIS_KEYS.pending(rideId));
+
+  if (pendingDriverId) {
+    clearTimeout(
+      (global as unknown as Record<string, ReturnType<typeof setTimeout>>)[
+        offerTimeoutHandleKey(rideId, pendingDriverId)
+      ],
+    );
+    await redis.del(REDIS_KEYS.driverActiveOffer(pendingDriverId));
+    await redis.zrem(OFFER_DEADLINES_ZSET, offerMember(rideId, pendingDriverId));
+
+    if (notifyPendingDriver) {
+      const io = getSocketManager();
+      const message =
+        cancelReason === 'no_driver'
+          ? 'Bu çağrı için müsait sürücü bulunamadı; istek kapatıldı.'
+          : cancelReason === 'accepted_by_other'
+            ? 'Bu çağrı başka bir sürücü tarafından kabul edildi.'
+            : 'Müşteri aramayı iptal etti.';
+      io.to(`driver:${pendingDriverId}`).emit('ride:request_cancelled', {
+        rideId,
+        reason: cancelReason,
+        message,
+      });
+    }
+  }
+
+  await Promise.all([
+    redis.del(REDIS_KEYS.matchingQueue(rideId)),
+    redis.del(REDIS_KEYS.matchingQueuedTotal(rideId)),
+    redis.del(REDIS_KEYS.matchingAskedCount(rideId)),
+    redis.del(REDIS_KEYS.matchingCtx(rideId)),
+    redis.del(REDIS_KEYS.rejected(rideId)),
+    redis.del(REDIS_KEYS.pending(rideId)),
+    redis.del(redisDriverResponseDeadlineKey(rideId)),
+  ]);
+}
