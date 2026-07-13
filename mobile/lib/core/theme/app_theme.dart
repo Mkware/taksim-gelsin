@@ -150,7 +150,7 @@ class AppTheme {
         bodyMedium: base.bodyMedium?.copyWith(height: 1.45),
         labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w700, letterSpacing: 0.2),
       ),
-      pageTransitionsTheme: const PageTransitionsTheme(
+      pageTransitionsTheme: PageTransitionsTheme(
         builders: {
           TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
