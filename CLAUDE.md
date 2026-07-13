@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository layout
 
-Three top-level workspaces, each independently buildable:
+Five top-level workspaces in a single git repo, each independently buildable:
 
 - `backend/` — Node 18+ / TypeScript / Express + Socket.io API server.
 - `mobile/` — Flutter app (customer + driver + admin in one binary, role-routed).
+- `admin-panel/` — Vite + React + TypeScript admin web UI. Talks to the backend via `VITE_API_ORIGIN` (`.env.development` / `.env.production`, both gitignored).
+- `web/` — Astro marketing/legal site (landing page, gizlilik/kvkk/kullanım koşulları, sürücü sayfası).
 - `supabase/` — Raw SQL migrations and ad-hoc scripts for the Supabase (PostgreSQL + PostGIS) database. There is no Supabase CLI config — migrations are applied manually via the Supabase SQL editor.
+
+The whole tree is one root-level git repo (GitHub: `Mkware/taksim-gelsin`). Previously only `mobile/` had its own separate git history; that got folded into this single monorepo on 2026-07-13 (old mobile-only history backed up locally, not preserved in the new repo).
 
 The repo root path itself contains a space and a Turkish character (`taksim-gelsin yedek kopyası 2`); always quote paths in shell commands.
 
@@ -24,10 +28,12 @@ npm install
 npm run dev      # ts-node-dev hot-reload on src/server.ts
 npm run build    # tsc → dist/
 npm start        # node dist/server.js (production)
-npm run lint     # eslint src/ --ext .ts
+npm run lint     # eslint src/ --ext .ts (flat config: backend/eslint.config.mjs)
 ```
 
-There is no test runner configured.
+There is no test runner configured (planned for a later hardening phase).
+
+CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` + `npm run lint` on every push/PR to `main`, alongside a mobile job (`flutter analyze` + `flutter test`).
 
 A `.env` is required at `backend/.env`; copy `backend/.env.example` and fill in Supabase, Redis, JWT, FCM, and `ADMIN_PHONES`. Env is parsed and validated by Zod in `src/config/env.ts` — the process exits on any validation failure with a list of missing/invalid keys.
 
@@ -71,8 +77,7 @@ Shared helpers in `src/services/` are deliberately cross-module (don't fold them
 cd mobile
 flutter pub get
 flutter run                                 # debug, attached device
-flutter test                                # unit tests under test/
-dart run build_runner build --delete-conflicting-outputs   # regenerate freezed/json/riverpod
+flutter test                                # unit tests under test/ (currently empty — no tests written yet)
 dart run flutter_launcher_icons             # rebuild app icons after changing brand_logo.png
 ```
 
@@ -80,9 +85,9 @@ Dart SDK ≥ 3.0. Firebase config is generated into `lib/firebase_options.dart` 
 
 ### Architecture
 
-- **State**: `flutter_riverpod` with code-generation (`riverpod_annotation` + `riverpod_generator`). Top-level providers are wired in `lib/providers/providers.dart`.
+- **State**: `flutter_riverpod`, hand-written providers (no code generation) — top-level providers are wired in `lib/providers/providers.dart` using plain `Provider`/`StateNotifierProvider` declarations. `riverpod_annotation`/`riverpod_generator`/`freezed`/`json_serializable`/`build_runner` were removed 2026-07-13: none were ever actually used (no `@riverpod`/`@freezed` annotations, no `part '*.g.dart'` directives, no generated files existed).
 - **Routing**: `go_router` declared in `lib/core/router/app_router.dart`. The `_GoRouterRefresh` listenable rebuilds redirects on `isLoggedInProvider` / `userRoleProvider` changes — do not replace the router on auth changes (would reset the stack and double-connect the socket).
-- **Networking**: `lib/services/api_service.dart` (Dio) and `lib/services/socket_service.dart` (socket_io_client) talk to the same backend origin. The base URL is **runtime-mutable**: `AppConstants.defaultServerOrigin` (currently `http://213.142.133.176:3000`) is just the seed; the active origin is persisted under `AppConstants.backendOriginKey` and editable from the admin screen, so don't hardcode URLs anywhere else.
+- **Networking**: `lib/services/api_service.dart` (Dio) and `lib/services/socket_service.dart` (socket_io_client) talk to the same backend origin. The base URL is **runtime-mutable**: `AppConstants.defaultServerOrigin` (currently `https://api.taksimgelsin.com`) is just the seed; the active origin is persisted under `AppConstants.backendOriginKey` and editable from the admin screen, so don't hardcode URLs anywhere else.
 - **Token refresh**: the Dio auth interceptor (`api_service.dart`) coalesces concurrent 401s through a single in-flight refresh `Completer` and surfaces three callbacks — `onAccessTokenRefreshed` (resync socket JWT), `onRefreshFailed`, `onSessionReplaced` (handles the backend's `SESSION_REPLACED` error code from the session_version mechanism).
 - **Screens** are split by role under `lib/screens/{customer,driver,admin,auth,profile,review,legal}/`. The same binary serves all three roles; `redirect` in the router decides where to land.
 - **FCM**: `lib/fcm_background_handler.dart` is the top-level background handler registered in `main.dart`. The driver registers its FCM token via `lib/services/driver_push_registration.dart` against the backend's `device_push_tokens` table.
@@ -90,6 +95,29 @@ Dart SDK ≥ 3.0. Firebase config is generated into `lib/firebase_options.dart` 
 ### Pinned dependency
 
 `pubspec.yaml` pins `path_provider_foundation: 2.5.1` via `dependency_overrides` to dodge an iOS Simulator FFI crash in 2.6+ (`DOBJC_initializeApi` failing to load `objective_c.framework`). Do not bump it without testing on the simulator. `main.dart` additionally swallows `path_provider`-flavored `PlatformException(channel-error)` from `google_fonts` disk cache writes — leave that filter in place.
+
+## Admin panel (`admin-panel/`)
+
+```bash
+cd admin-panel
+npm install
+npm run dev      # vite dev server
+npm run build    # tsc -b && vite build → dist/
+npm run lint     # oxlint
+```
+
+Vite + React + TypeScript, talks to the backend's `/api/v1/admin/*` routes. Base URL comes from `VITE_API_ORIGIN` in `.env.development` / `.env.production` (both gitignored — copy the value pattern from an existing deploy, not committed anywhere).
+
+## Marketing site (`web/`)
+
+```bash
+cd web
+npm install
+npm run dev       # astro dev
+npm run build     # astro build → dist/
+```
+
+Astro static site: landing page, driver info page, and the legal pages (`gizlilik`, `kvkk`, `kullanım-koşulları`) whose copy also backs the in-app legal screens (`mobile/lib/screens/legal/`, `mobile/lib/content/legal_texts_tr.dart`) — keep the two in sync when legal text changes.
 
 ## Database (`supabase/`)
 

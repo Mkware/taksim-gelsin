@@ -897,7 +897,6 @@ router.post('/ops/stale-searching/recover', async (_req: Request, res: Response)
   }
 });
 
-// eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_REGEX = /\x1b\[[0-9;]*m/g;
 
 router.get('/logs', async (req: Request, res: Response) => {

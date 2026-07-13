@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (tsc + lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+
+  mobile:
+    name: Mobile (analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      # Faz 0: yalnızca gerçek (error seviyeli) sorunlarda kırmızı yansın.
+      # Mevcut info/warning borcu (withOpacity deprecation, birkaç kullanılmayan
+      # özel metod) fazlı sertleştirme planına göre sonraki fazlarda temizlenip
+      # bu bayraklar kaldırılacak — bkz. docs/KOD_ANALIZI_VE_YOL_HARITASI_2026-07-12.md
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test

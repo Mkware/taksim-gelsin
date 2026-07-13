@@ -38,7 +38,7 @@ router.get('/me', roleMiddleware(['driver']), async (req: Request, res: Response
     }
 
     res.json({ success: true, data });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Sürücü profili alınamadı.' });
   }
 });
@@ -75,7 +75,7 @@ router.get('/nearby', roleMiddleware(['customer']), async (req: Request, res: Re
     }
 
     res.json({ success: true, data: data || [] });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Sürücü arama sırasında hata oluştu.' });
   }
 });
@@ -129,7 +129,7 @@ router.patch('/status', roleMiddleware(['driver']), async (req: Request, res: Re
       data,
       message: is_online ? 'Çevrimiçi oldunuz.' : 'Çevrimdışı oldunuz.',
     });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'Durum güncellenirken hata oluştu.' });
   }
 });
@@ -149,7 +149,7 @@ router.get('/stats', roleMiddleware(['driver']), async (req: Request, res: Respo
     }
 
     res.json({ success: true, data: data?.[0] || null });
-  } catch (error) {
+  } catch {
     res.status(500).json({ success: false, error: 'İstatistikler alınırken hata oluştu.' });
   }
 });
