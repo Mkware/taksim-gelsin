@@ -1,0 +1,12 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import LegalProse from '@/components/LegalProse.astro';
+import { privacyText } from '@/content/legal';
+---
+
+<BaseLayout
+  title="Gizlilik Politikası"
+  description="Taksim Gelsin mobil uygulaması gizlilik politikası."
+>
+  <LegalProse title="Gizlilik Politikası" body={privacyText} />
+</BaseLayout>

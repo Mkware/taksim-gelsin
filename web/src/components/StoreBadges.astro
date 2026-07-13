@@ -1,0 +1,48 @@
+---
+import { siteConfig } from '@/config/site';
+
+const { appStore, playStore } = siteConfig.storeLinks;
+const hasStore = Boolean(appStore || playStore);
+---
+
+<div class="flex flex-wrap items-center justify-center gap-4">
+  {
+    playStore ? (
+      <a
+        href={playStore}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="btn-secondary min-w-[180px]"
+      >
+        Google Play
+      </a>
+    ) : (
+      <span class="btn-secondary min-w-[180px] cursor-default opacity-60" aria-disabled="true">
+        Google Play — yakında
+      </span>
+    )
+  }
+  {
+    appStore ? (
+      <a
+        href={appStore}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="btn-secondary min-w-[180px]"
+      >
+        App Store
+      </a>
+    ) : (
+      <span class="btn-secondary min-w-[180px] cursor-default opacity-60" aria-disabled="true">
+        App Store — yakında
+      </span>
+    )
+  }
+</div>
+{
+  !hasStore && (
+    <p class="mt-4 text-center text-sm text-muted">
+      Mağaza bağlantıları hazır olduğunda <code class="rounded bg-surface-subtle px-1">src/config/site.ts</code> dosyasından güncellenir.
+    </p>
+  )
+}

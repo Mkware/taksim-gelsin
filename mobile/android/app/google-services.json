@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "736252281874",
+    "project_id": "taksim-gelsin-433f0",
+    "storage_bucket": "taksim-gelsin-433f0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:736252281874:android:7c22dd7386e3154c0444cb",
+        "android_client_info": {
+          "package_name": "com.taksim.gelsin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0LIgx7miepp0bOYWYMoqIW9S9yGC904o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

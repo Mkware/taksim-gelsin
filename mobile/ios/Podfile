@@ -1,0 +1,96 @@
+# Define a global platform for your project.
+platform :ios, '15.0'
+
+# All pods must use at least this (Xcode 16+ rejects 9.0 / 11.0 simulator targets).
+MIN_IOS = '15.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+# Some plugins ship Obj-C that fails strict builds or mis-assign NSNull to NSString*.
+# Apply tiny fixes in the pub cache after `flutter pub get` (run pod install after pub get).
+def patch_pub_cache_plugins
+  pub_dev = File.join(Dir.home, '.pub-cache', 'hosted', 'pub.dev')
+  patches = [
+    [
+      File.join(pub_dev, 'firebase_core-*', 'ios', 'firebase_core', 'Sources', 'firebase_core', 'FLTFirebaseCorePlugin.m'),
+      'pigeonOptions.deepLinkURLScheme = [NSNull null];',
+      'pigeonOptions.deepLinkURLScheme = nil;'
+    ],
+    [
+      File.join(pub_dev, 'flutter_ringtone_player-*', 'ios', 'Classes', 'FlutterRingtonePlayerPlugin.m'),
+      'SystemSoundID soundId = nil;',
+      'SystemSoundID soundId = 0;'
+    ],
+  ]
+  patches.each do |pattern, old_s, new_s|
+    Dir.glob(pattern).each do |path|
+      next unless File.file?(path)
+      txt = File.read(path)
+      next unless txt.include?(old_s)
+      File.write(path, txt.sub(old_s, new_s))
+      Pod::UI.puts "[Podfile] Patched plugin file: #{path}"
+    end
+  end
+end
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+pre_install do |_installer|
+  patch_pub_cache_plugins
+end
+
+target 'Runner' do
+  # Firebase (Swift) + GoogleUtilities statik pod birleşimi için modül haritaları gerekir.
+  # Aksi halde: "Swift pod FirebaseCoreInternal depends upon GoogleUtilities, which does not define modules"
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.build_configurations.each do |config|
+    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = MIN_IOS
+  end
+
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = MIN_IOS
+    end
+
+    # geocoding_ios (and others) add PrivacyInfo.xcprivacy to Compile Sources; Xcode then
+    # tries to "compile" XML → "no rule to process file … xcprivacy". Remove from sources only.
+    next unless target.respond_to?(:source_build_phase)
+    phase = target.source_build_phase
+    phase.files.to_a.each do |build_file|
+      ref = build_file.file_ref
+      next unless ref&.path&.end_with?('PrivacyInfo.xcprivacy')
+      build_file.remove_from_project
+    end
+  end
+end

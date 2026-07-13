@@ -1,0 +1,17 @@
+# OS
+.DS_Store
+
+# Claude Code local settings (machine-specific)
+.claude/
+
+# Root-level node artifacts, if any ever appear
+/node_modules/
+
+# Editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Each workspace (backend/, mobile/, admin-panel/, web/, supabase/) has its
+# own .gitignore for node_modules, dist, build, .env, etc. — git honors
+# those regardless of where the repo root is.

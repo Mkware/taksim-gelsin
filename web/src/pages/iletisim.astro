@@ -1,0 +1,61 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import { siteConfig } from '@/config/site';
+---
+
+<BaseLayout
+  title="İletişim"
+  description="Taksim Gelsin destek ve iletişim bilgileri."
+>
+  <section class="py-16 sm:py-20">
+    <div class="mx-auto max-w-2xl px-4 sm:px-6">
+      <h1 class="section-heading">İletişim</h1>
+      <p class="section-sub">
+        Destek talepleriniz, KVKK başvurularınız ve genel sorularınız için bize ulaşın.
+      </p>
+
+      <div class="mt-10 space-y-6 rounded-2xl border border-border bg-white p-6 shadow-card sm:p-8">
+        <div>
+          <h2 class="text-sm font-bold uppercase tracking-wide text-muted">E-posta</h2>
+          <a
+            href={`mailto:${siteConfig.contactEmail}`}
+            class="mt-1 inline-block text-lg font-semibold text-ink underline decoration-primary/50 underline-offset-4 hover:text-primary"
+          >
+            {siteConfig.contactEmail}
+          </a>
+        </div>
+
+        {
+          siteConfig.contactPhone ? (
+            <div>
+              <h2 class="text-sm font-bold uppercase tracking-wide text-muted">Telefon</h2>
+              <a
+                href={`tel:${siteConfig.contactPhone.replace(/\s/g, '')}`}
+                class="mt-1 inline-block text-lg font-semibold text-ink"
+              >
+                {siteConfig.contactPhone}
+              </a>
+            </div>
+          ) : null
+        }
+
+        <div>
+          <h2 class="text-sm font-bold uppercase tracking-wide text-muted">Bölge</h2>
+          <p class="mt-1 text-lg font-semibold text-ink">{siteConfig.city}, Türkiye</p>
+        </div>
+
+        <p class="text-sm leading-relaxed text-muted">
+          KVKK kapsamındaki başvurularınızda kimliğinizi tevsik edecek bilgi ve belgeleri eklemenizi
+          rica ederiz. Yasal metinler için
+          <a href="/kvkk" class="font-semibold text-ink underline decoration-primary/50"> KVKK </a>,
+          <a href="/gizlilik" class="font-semibold text-ink underline decoration-primary/50"> gizlilik </a>
+          ve
+          <a href="/kullanim-kosullari" class="font-semibold text-ink underline decoration-primary/50">
+            kullanım koşulları
+          </a>
+          sayfalarına bakabilirsiniz.
+        </p>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

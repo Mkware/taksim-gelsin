@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://taksimgelsin.com/sitemap-index.xml

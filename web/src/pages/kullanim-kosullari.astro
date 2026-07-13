@@ -1,0 +1,12 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import LegalProse from '@/components/LegalProse.astro';
+import { termsText } from '@/content/legal';
+---
+
+<BaseLayout
+  title="Kullanım Koşulları"
+  description="Taksim Gelsin uygulaması kullanım koşulları."
+>
+  <LegalProse title="Kullanım Koşulları" body={termsText} />
+</BaseLayout>

@@ -1,0 +1,53 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import { siteConfig } from '@/config/site';
+---
+
+<BaseLayout
+  title="Sürücüler"
+  description="Taksim Gelsin sürücü ortaklığı ve kayıt süreci hakkında bilgi."
+>
+  <section class="py-16 sm:py-20">
+    <div class="mx-auto max-w-3xl px-4 sm:px-6">
+      <h1 class="section-heading">Sürücü ortaklığı</h1>
+      <p class="section-sub">
+        Taksim Gelsin, yolcu ile bağımsız sürücüleri eşleştiren bir platformdur. Sürücü hesapları
+        yalnızca yetkili süreçlerle açılır.
+      </p>
+
+      <div class="mt-10 space-y-6">
+        <article class="rounded-2xl border border-border bg-white p-6 shadow-card sm:p-8">
+          <h2 class="text-xl font-bold text-ink">Uygulama içi kayıt yoktur</h2>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            Mobil uygulamada herkese açık bir “sürücü kaydı” formu bulunmaz. Sürücü rolü; sözleşme,
+            onay ve operasyonel uygunluk süreçleri tamamlandıktan sonra veri sorumlusu tarafından
+            tanımlanır.
+          </p>
+        </article>
+
+        <article class="rounded-2xl border border-amber-200 bg-primary/10 p-6 sm:p-8">
+          <h2 class="text-xl font-bold text-ink">Başvuru için iletişim</h2>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            {siteConfig.city} bölgesinde sürücü ortağı olmak için bizimle iletişime geçin. Gerekli
+            belgeler ve araç bilgileri süreç içinde paylaşılacaktır.
+          </p>
+          <a
+            href="/iletisim"
+            class="btn-primary mt-6 inline-flex"
+          >
+            İletişim sayfası
+          </a>
+        </article>
+
+        <article class="rounded-2xl border border-border bg-surface-muted p-6 sm:p-8">
+          <h2 class="text-xl font-bold text-ink">Sürücü cüzdanı (T-Coin)</h2>
+          <p class="mt-3 text-sm leading-relaxed text-muted">
+            Sürücüler platform üzerinde T-Coin bakiyesi ile çalışır; yolculuk kabulü ve operasyonel
+            kurallar uygulama ve yönetim paneli ayarlarına göre yürütülür. Detaylar kayıt sonrası
+            paylaşılır.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

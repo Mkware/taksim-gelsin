@@ -1,0 +1,12 @@
+---
+import BaseLayout from '@/layouts/BaseLayout.astro';
+import LegalProse from '@/components/LegalProse.astro';
+import { kvkkText } from '@/content/legal';
+---
+
+<BaseLayout
+  title="KVKK Aydınlatma"
+  description="Taksim Gelsin KVKK kapsamında kişisel verilerin işlenmesine ilişkin aydınlatma metni."
+>
+  <LegalProse title="KVKK Aydınlatma Metni" body={kvkkText} />
+</BaseLayout>

@@ -1,0 +1,7 @@
+-- Kabul ücreti artık sabit T Coin değil; tahmini ücretin yüzdesi (admin: rideAcceptFeePercent).
+-- Mevcut platform_settings satırına varsayılan %7 eklemek için (isteğe bağlı, Supabase SQL editöründe):
+--
+-- UPDATE public.platform_settings
+-- SET settings = settings || '{"rideAcceptFeePercent": 7}'::jsonb,
+--     updated_at = NOW()
+-- WHERE id = 'default';

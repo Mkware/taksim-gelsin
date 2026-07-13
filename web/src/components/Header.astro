@@ -1,0 +1,64 @@
+---
+import { siteConfig } from '@/config/site';
+
+const nav = [
+  { href: '/#ozellikler', label: 'Özellikler' },
+  { href: '/#nasil-calisir', label: 'Nasıl çalışır?' },
+  { href: '/#sss', label: 'SSS' },
+  { href: '/surucu', label: 'Sürücüler' },
+  { href: '/iletisim', label: 'İletişim' },
+];
+
+const currentPath = Astro.url.pathname;
+---
+
+<header class="sticky top-0 z-50 border-b border-border/80 bg-white/90 backdrop-blur-md">
+  <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+    <a href="/" class="flex items-center gap-3 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+      <img
+        src="/assets/brand_logo.png"
+        alt={siteConfig.name}
+        width="44"
+        height="44"
+        class="h-11 w-11 rounded-xl object-contain"
+      />
+      <span class="hidden text-lg font-extrabold tracking-tight text-ink sm:inline">{siteConfig.name}</span>
+    </a>
+
+    <nav class="hidden items-center gap-1 md:flex" aria-label="Ana menü">
+      {
+        nav.map((item) => (
+          <a
+            href={item.href}
+            class:list={[
+              'rounded-lg px-3 py-2 text-sm font-semibold transition',
+              item.href === currentPath
+                ? 'bg-primary/15 text-ink'
+                : 'text-muted hover:bg-surface-subtle hover:text-ink',
+            ]}
+          >
+            {item.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    <a href="/#indir" class="btn-primary hidden shrink-0 sm:inline-flex">Uygulamayı indir</a>
+
+    <details class="relative md:hidden">
+      <summary class="list-none cursor-pointer rounded-lg border border-border px-3 py-2 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+        Menü
+      </summary>
+      <div class="absolute right-0 mt-2 w-52 rounded-xl border border-border bg-white p-2 shadow-card">
+        {
+          nav.map((item) => (
+            <a href={item.href} class="block rounded-lg px-3 py-2 text-sm font-semibold text-ink hover:bg-surface-subtle">
+              {item.label}
+            </a>
+          ))
+        }
+        <a href="/#indir" class="btn-primary mt-2 w-full">Uygulamayı indir</a>
+      </div>
+    </details>
+  </div>
+</header>
