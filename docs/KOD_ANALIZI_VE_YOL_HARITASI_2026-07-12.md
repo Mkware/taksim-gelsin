@@ -29,7 +29,7 @@ Kod tabanı ~33k satır (backend ~12,5k TS, mobile ~20k Dart), 14 migration. Mim
 - CLAUDE.md "riverpod_annotation + freezed codegen" diyor ama kodda tek bir `@riverpod` anotasyonu veya üretilmiş `.g.dart`/`.freezed.dart` dosyası yok — bağımlılıklar ölü, modeller elle yazılmış. Dokümantasyon kodun önünde.
 - `firebase_auth` pubspec'te var, hiçbir yerde kullanılmıyor (ölü bağımlılık).
 - Backend'de `npm run lint` tanımlı ama eslint devDependencies'te yok ve config dosyası yok — **lint komutu fiilen çalışmaz**.
-- Desen ihlalleri: `admin.routes.ts` (1.005 satır, 30 route) controller/service katmanını atlayıp route içinde doğrudan DB sorgusu yapıyor; `matching.service.old.ts` ölü kod (CLAUDE.md bilinçli tuttuğunu söylüyor).
+- ~~Desen ihlalleri: `admin.routes.ts` (1.005 satır) controller/service katmanını atlayıp route içinde doğrudan DB sorgusu yapıyor; `matching.service.old.ts` ölü kod~~ — 15 Tem 2026'da düzeltildi (madde 11).
 
 ### 3. Teknik borç — Yönetilebilir ve büyük ölçüde belgelenmiş
 
@@ -137,7 +137,7 @@ Yani ikisi de daha önce SQL editöründen elle düzeltilmiş/eklenmiş ama migr
 
 - [x] 9. Migration'ları takip edilebilir yap. — 14 Tem 2026: Supabase CLI yerine (mevcut "SQL editöründen elle" akışını bozmayan) hafif bir `schema_migrations` tablosu (`010_schema_migrations.sql`) + kural — her yeni migration dosyası kendini `INSERT ... ON CONFLICT DO NOTHING` ile bu tabloya kaydeder, ayrı bir adım unutulamaz. `backend/npm run check-migrations` yerel dosyalarla canlı tabloyu karşılaştırıp sapmayı raporluyor (salt-okunur). Süreçte bulunan `backend/scripts/add_session_version.sql` (ad-hoc, hiç migration'a dönüşmemiş) silindi, `009_user_session_version.sql` onun yerini aldı. **⚠️ 009 ve 010 canlı Supabase'de henüz uygulanmadı — SQL editöründen elle çalıştırılmaları gerekiyor** (009 zaten no-op çünkü kolon var; 010 tabloyu ilk kez oluşturuyor).
 - [x]/[ ] 10. Mobilde "dokunduğun ekranı böl" kuralı. — 15 Tem 2026: bu maddenin en büyük kalemi (`admin_home_screen.dart`, 3.526 satır) bölmeye gerek kalmadan tamamen ortadan kalktı — admin paneli webe taşındı (`panel.taksimgelsin.com`), mobildeki admin ekranı/route'u/API metodları/`UserModel.isAdmin` silindi (bkz. CLAUDE.md). Kalan: `driver_home_screen.dart` (1.554 satır) hâlâ bölünmedi, `providers.dart` (506 satır) hâlâ tek dosyada.
-- [ ] 11. `admin.routes.ts`'i controller/service desenine çek; `matching.service.old.ts`'i sil (git geçmişi artık referans olur).
+- [x] 11. `admin.routes.ts`'i controller/service desenine çek; `matching.service.old.ts`'i sil. — 15 Tem 2026: sürücü CRUD'u (`admin_drivers.service.ts`) ve genel bakış (`admin_overview.service.ts`) yeni servis dosyalarına çıkarıldı (1.028 → 778 satır); rides/customers/reviews/live-ops zaten daha önce ayrılmıştı. `matching.service.old.ts` silindi (kimse import etmiyordu), `eslint.config.mjs`'deki muafiyet kaydı da kaldırıldı.
 - [ ] 12. Tarifeyi `platform_settings`'e taşı.
 
 ### Faz 4 — Türkiye ölçeği hazırlığı (büyümeden önce)
