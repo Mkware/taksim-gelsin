@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -16,6 +18,31 @@ class DirectionsService {
   final String _apiKey;
 
   DirectionsService(this._apiKey);
+
+  // ============================================================
+  // OTURUM BELİRTECİ (session token) — maliyet optimizasyonu
+  //
+  // Google, aynı sessiontoken ile gönderilen Autocomplete çağrılarını +
+  // ardından gelen Place Details çağrısını TEK bir Place Details ücreti
+  // olarak faturalandırıyor (token yoksa her Autocomplete çağrısı ayrı
+  // ücretlendirilir). Bir arama oturumu = yazarken gelen tüm öneriler +
+  // seçilen sonucun detayı; detay çağrısı tamamlanınca token sıfırlanır,
+  // bir sonraki arama yeni bir oturumla başlar.
+  // https://developers.google.com/maps/documentation/places/web-service/session-tokens
+  // ============================================================
+  String? _sessionToken;
+
+  String _ensureSessionToken() => _sessionToken ??= _generateSessionToken();
+
+  String _generateSessionToken() {
+    final rnd = Random.secure();
+    String hex(int n) =>
+        List.generate(n, (_) => rnd.nextInt(16).toRadixString(16)).join();
+    // UUID v4 biçimi (Google'ın önerdiği format; katı RFC uyumu şart değil,
+    // yalnızca oturum başına benzersiz olması yeterli).
+    return '${hex(8)}-${hex(4)}-4${hex(3)}-'
+        '${(8 + rnd.nextInt(4)).toRadixString(16)}${hex(3)}-${hex(12)}';
+  }
 
   // ============================================================
   // PLACES AUTOCOMPLETE — Yazarak adres arama
@@ -46,6 +73,7 @@ class DirectionsService {
         'language': 'tr',
         'components': 'country:tr',
         'types': 'geocode|establishment',
+        'sessiontoken': _ensureSessionToken(),
       };
 
       // Konum bazlı önceliklendirme (yakındaki sonuçlar önce)
@@ -81,9 +109,14 @@ class DirectionsService {
     }
   }
 
-  /// Place ID'den koordinat al (Place Details API)
+  /// Place ID'den koordinat al (Place Details API).
+  /// Bu, o ana kadarki Autocomplete çağrılarıyla aynı sessiontoken'ı taşıyıp
+  /// oturumu kapatır — çağrı sonucu ne olursa olsun bir sonraki arama yeni
+  /// bir oturumla (yeni token) başlasın diye token burada sıfırlanır.
   Future<PlaceDetail?> getPlaceDetails(String placeId) async {
     if (_apiKey.trim().isEmpty) return null;
+    final sessionToken = _ensureSessionToken();
+    _sessionToken = null;
     try {
       final response = await _dio.get(
         'https://maps.googleapis.com/maps/api/place/details/json',
@@ -92,6 +125,7 @@ class DirectionsService {
           'key': _apiKey,
           'language': 'tr',
           'fields': 'geometry,formatted_address,name',
+          'sessiontoken': sessionToken,
         },
       );
 
