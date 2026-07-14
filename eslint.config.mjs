@@ -2,8 +2,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    // matching.service.old.ts kasıtlı olarak düzenlenmiyor (bkz. CLAUDE.md) — lint'ten de muaf.
-    ignores: ['dist/**', 'node_modules/**', 'src/services/matching.service.old.ts'],
+    ignores: ['dist/**', 'node_modules/**'],
   },
   ...tseslint.configs.recommended,
   {

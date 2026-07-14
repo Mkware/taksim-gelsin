@@ -1,5 +1,4 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth.middleware';
@@ -15,8 +14,6 @@ import {
 } from '../../services/platform_settings.service';
 import { logger } from '../../utils/logger';
 import { AppError } from '../../middleware/error.middleware';
-import { disconnectSocketsForUser } from '../../sockets/socket.manager';
-import { invalidateSessionVersionCache } from '../../middleware/auth.middleware';
 import { env } from '../../config/env';
 import { sendAdminBroadcastPush } from '../../services/push_notification.service';
 import { listAdminReviews } from '../../services/admin_reviews.service';
@@ -35,6 +32,14 @@ import {
   updateAdminCustomer,
 } from '../../services/admin_customers.service';
 import {
+  addAdminDriverBalance,
+  deleteAdminDriver,
+  listAdminDrivers,
+  setAdminDriverAccess,
+  updateAdminDriver,
+} from '../../services/admin_drivers.service';
+import { getAdminOverview } from '../../services/admin_overview.service';
+import {
   adminClearRideMatching,
   adminRecoverStaleSearching,
   getAdminLiveSnapshot,
@@ -45,8 +50,6 @@ import {
 
 const router = Router();
 const PRICING_KEY = 'admin:pricing:v1';
-
-const BCRYPT_ROUNDS = 12;
 
 const adminBroadcastAudienceSchema = z.enum(['all', 'customers', 'drivers', 'user']);
 
@@ -140,42 +143,13 @@ router.use(authMiddleware, requireAdmin, adminApiLimiter);
 
 router.get('/overview', async (_req: Request, res: Response) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-
-    const [
-      usersCountRes,
-      driversCountRes,
-      activeRidesCountRes,
-      completedTodayRes,
-      todayRevenueRes,
-      monthRevenueRes,
-    ] = await Promise.all([
-      supabaseAdmin.from('users').select('id', { count: 'exact', head: true }),
-      supabaseAdmin.from('drivers').select('id', { count: 'exact', head: true }),
-      supabaseAdmin.from('rides').select('id', { count: 'exact', head: true }).in('status', ['searching', 'accepted', 'arriving', 'in_progress']),
-      supabaseAdmin.from('rides').select('id', { count: 'exact', head: true }).eq('status', 'completed').gte('completed_at', today.toISOString()),
-      supabaseAdmin.from('rides').select('final_price, estimated_price').eq('status', 'completed').gte('completed_at', today.toISOString()),
-      supabaseAdmin.from('rides').select('final_price, estimated_price').eq('status', 'completed').gte('completed_at', monthStart.toISOString()),
-    ]);
-
-    const sumRevenue = (rows: Array<{ final_price?: number | null; estimated_price?: number | null }> | null) =>
-      (rows ?? []).reduce((acc, row) => acc + Number(row.final_price ?? row.estimated_price ?? 0), 0);
-
-    res.json({
-      success: true,
-      data: {
-        users: usersCountRes.count ?? 0,
-        drivers: driversCountRes.count ?? 0,
-        activeRides: activeRidesCountRes.count ?? 0,
-        completedToday: completedTodayRes.count ?? 0,
-        revenueToday: Math.round(sumRevenue(todayRevenueRes.data as Array<{ final_price?: number | null; estimated_price?: number | null }> | null) * 100) / 100,
-        revenueMonth: Math.round(sumRevenue(monthRevenueRes.data as Array<{ final_price?: number | null; estimated_price?: number | null }> | null) * 100) / 100,
-      },
-    });
-  } catch {
+    const data = await getAdminOverview();
+    res.json({ success: true, data });
+  } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Genel durum bilgisi alınamadı.' });
   }
 });
@@ -248,49 +222,13 @@ router.put('/settings/platform', async (req: Request, res: Response) => {
 
 router.get('/drivers', async (_req: Request, res: Response) => {
   try {
-    const { data: drivers, error: driverErr } = await supabaseAdmin
-      .from('drivers')
-      .select('id, is_online, is_available, vehicle_plate, vehicle_model, vehicle_color, balance')
-      .limit(200);
-
-    if (driverErr) {
-      res.status(500).json({ success: false, error: 'Sürücü listesi alınamadı.' });
+    const data = await listAdminDrivers();
+    res.json({ success: true, data });
+  } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
       return;
     }
-
-    const ids = (drivers ?? []).map((d) => d.id as string);
-    let userMap = new Map<string, Record<string, unknown>>();
-    if (ids.length > 0) {
-      const { data: users, error: userErr } = await supabaseAdmin
-        .from('users')
-        .select('id, full_name, phone, rating, rating_count')
-        .in('id', ids);
-      if (!userErr && users) {
-        userMap = new Map(
-          users.map((u) => [u.id as string, u as Record<string, unknown>]),
-        );
-      }
-    }
-
-    const socketKeyValues = ids.length > 0
-      ? await Promise.all(ids.map((id) => redis.get(`driver:socket:${id}`)))
-      : [];
-    const onlineSet = new Set(
-      ids.filter((_, idx) => Boolean(socketKeyValues[idx])),
-    );
-
-    const items = (drivers ?? []).map((d) => {
-      const id = d.id as string;
-      const realtimeOnline = onlineSet.has(id);
-      return {
-        ...d,
-        is_online: realtimeOnline,
-        users: userMap.get(id) ?? null,
-      };
-    });
-
-    res.json({ success: true, data: { items } });
-  } catch {
     res.status(500).json({ success: false, error: 'Sürücü listesi alınamadı.' });
   }
 });
@@ -335,106 +273,22 @@ router.patch('/drivers/:id', async (req: Request, res: Response) => {
     return;
   }
 
+  const parsed = adminDriverUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const first = parsed.error.flatten().fieldErrors;
+    const msg = Object.values(first).flat()[0] ?? 'Geçersiz veri.';
+    res.status(400).json({ success: false, error: msg });
+    return;
+  }
+
   try {
-    const parsed = adminDriverUpdateSchema.safeParse(req.body);
-    if (!parsed.success) {
-      const first = parsed.error.flatten().fieldErrors;
-      const msg = Object.values(first).flat()[0] ?? 'Geçersiz veri.';
-      res.status(400).json({ success: false, error: msg });
-      return;
-    }
-    const patch = parsed.data;
-    if (Object.keys(patch).length === 0) {
-      res.status(400).json({ success: false, error: 'Güncellenecek alan yok.' });
-      return;
-    }
-
-    const { data: userRow, error: userErr } = await supabaseAdmin
-      .from('users')
-      .select('id, role, phone, session_version')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (userErr || !userRow || userRow.role !== 'driver') {
-      res.status(404).json({ success: false, error: 'Sürücü bulunamadı.' });
-      return;
-    }
-
-    if (patch.phone && patch.phone !== userRow.phone) {
-      const { data: taken } = await supabaseAdmin
-        .from('users')
-        .select('id')
-        .eq('phone', patch.phone)
-        .neq('id', id)
-        .maybeSingle();
-      if (taken) {
-        res.status(409).json({ success: false, error: 'Bu telefon başka kullanıcıda kayıtlı.' });
-        return;
-      }
-    }
-
-    if (patch.vehicle_plate) {
-      const { data: plateRow } = await supabaseAdmin
-        .from('drivers')
-        .select('id')
-        .eq('vehicle_plate', patch.vehicle_plate)
-        .neq('id', id)
-        .maybeSingle();
-      if (plateRow) {
-        res.status(409).json({ success: false, error: 'Bu plaka başka sürücüde kayıtlı.' });
-        return;
-      }
-    }
-
-    const userUpdates: Record<string, unknown> = {};
-    if (patch.full_name != null) userUpdates.full_name = patch.full_name;
-    if (patch.phone != null) userUpdates.phone = patch.phone;
-
-    let bumpSession = false;
-    if (patch.password != null) {
-      userUpdates.password_hash = await bcrypt.hash(patch.password, BCRYPT_ROUNDS);
-      bumpSession = true;
-    }
-    if (patch.phone != null && patch.phone !== userRow.phone) {
-      bumpSession = true;
-    }
-
-    if (bumpSession) {
-      const curSv = Number(userRow.session_version ?? 0);
-      userUpdates.session_version = curSv + 1;
-      userUpdates.refresh_token = null;
-    }
-
-    if (Object.keys(userUpdates).length > 0) {
-      const { error: updUserErr } = await supabaseAdmin.from('users').update(userUpdates).eq('id', id);
-      if (updUserErr) {
-        logger.error('[Admin] users update:', updUserErr);
-        res.status(500).json({ success: false, error: 'Kullanıcı güncellenemedi.' });
-        return;
-      }
-    }
-
-    const driverUpdates: Record<string, unknown> = {};
-    if (patch.vehicle_plate != null) driverUpdates.vehicle_plate = patch.vehicle_plate;
-    if (patch.vehicle_model != null) driverUpdates.vehicle_model = patch.vehicle_model;
-    if (patch.vehicle_color != null) driverUpdates.vehicle_color = patch.vehicle_color;
-
-    if (Object.keys(driverUpdates).length > 0) {
-      const { error: drvErr } = await supabaseAdmin.from('drivers').update(driverUpdates).eq('id', id);
-      if (drvErr) {
-        logger.error('[Admin] drivers update:', drvErr);
-        res.status(500).json({ success: false, error: 'Sürücü araç bilgisi güncellenemedi.' });
-        return;
-      }
-    }
-
-    if (bumpSession) {
-      await invalidateSessionVersionCache(id);
-      disconnectSocketsForUser(id);
-    }
-
-    res.json({ success: true, data: { id } });
+    const data = await updateAdminDriver(id, parsed.data);
+    res.json({ success: true, data });
   } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
+      return;
+    }
     logger.error('[Admin] Sürücü güncelleme:', e);
     res.status(500).json({ success: false, error: 'Sürücü güncellenemedi.' });
   }
@@ -449,162 +303,58 @@ router.delete('/drivers/:id', async (req: Request, res: Response) => {
   }
 
   try {
-    const { data: userRow, error: userErr } = await supabaseAdmin
-      .from('users')
-      .select('id, role')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (userErr || !userRow || userRow.role !== 'driver') {
-      res.status(404).json({ success: false, error: 'Sürücü bulunamadı.' });
-      return;
-    }
-
-    disconnectSocketsForUser(id);
-    await Promise.all([
-      redis.del(`driver:socket:${id}`),
-      redis.del(`driver:location:${id}`),
-      redis.del(`driver:active_ride:${id}`),
-      redis.del(`driver:pending_offer:${id}`),
-    ]);
-
-    const { error: delErr } = await supabaseAdmin.from('users').delete().eq('id', id);
-    if (delErr) {
-      logger.error('[Admin] Sürücü silme:', delErr);
-      res.status(500).json({ success: false, error: 'Sürücü silinemedi.' });
-      return;
-    }
-
-    await invalidateSessionVersionCache(id);
-    res.json({ success: true, data: { id } });
+    const data = await deleteAdminDriver(id);
+    res.json({ success: true, data });
   } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
+      return;
+    }
     logger.error('[Admin] Sürücü silme istisna:', e);
     res.status(500).json({ success: false, error: 'Sürücü silinemedi.' });
   }
 });
 
 router.post('/drivers/:id/balance', async (req: Request, res: Response) => {
+  const id = req.params.id;
+  if (!isValidUUID(id)) {
+    res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID zorunludur.' });
+    return;
+  }
+  const amount = Number((req.body as { amount?: number }).amount ?? 0);
+
   try {
-    const id = req.params.id;
-    const amount = Number((req.body as { amount?: number }).amount ?? 0);
-
-    if (!isValidUUID(id)) {
-      res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID zorunludur.' });
+    const data = await addAdminDriverBalance(id, amount);
+    res.json({ success: true, data });
+  } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
       return;
     }
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      res.status(400).json({ success: false, error: 'Geçerli bir bakiye tutarı girin.' });
-      return;
-    }
-
-    const { error: rpcError } = await supabaseAdmin.rpc('add_driver_balance', {
-      p_driver_id: id,
-      p_amount: amount,
-    });
-
-    if (rpcError) {
-      logger.warn('[AdminBalance] add_driver_balance rpc missing/failed, fallback kullanılacak:', rpcError.message);
-
-      // Bazı ortamlarda RPC migration'ı eksik/bozuk olabiliyor.
-      // Panelin çalışmaya devam etmesi için kontrollü fallback (read+write) uygula.
-      const { data: row, error: rowErr } = await supabaseAdmin
-        .from('drivers')
-        .select('id, balance')
-        .eq('id', id)
-        .single();
-
-      if (rowErr || !row) {
-        res.status(500).json({
-          success: false,
-          error: `Sürücü bakiyesi güncellenemedi (rpc): ${rpcError.message ?? 'bilinmeyen hata'}`,
-        });
-        return;
-      }
-
-      const current = Number(row.balance ?? 0);
-      const nextBalance = Math.round((current + amount) * 100) / 100;
-      const { data: updated, error: updErr } = await supabaseAdmin
-        .from('drivers')
-        .update({ balance: nextBalance })
-        .eq('id', id)
-        .select('id, balance')
-        .single();
-
-      if (updErr || !updated) {
-        logger.error('[AdminBalance] fallback update error:', updErr);
-        res.status(500).json({
-          success: false,
-          error: `Sürücü bakiyesi güncellenemedi (fallback): ${updErr?.message ?? 'bilinmeyen hata'}`,
-        });
-        return;
-      }
-
-      res.json({
-        success: true,
-        data: {
-          id: updated.id,
-          balance: Number(updated.balance ?? 0),
-        },
-      });
-      return;
-    }
-
-    const { data: driver, error: driverError } = await supabaseAdmin
-      .from('drivers')
-      .select('id, balance')
-      .eq('id', id)
-      .single();
-
-    if (driverError || !driver) {
-      res.status(404).json({ success: false, error: 'Sürücü bulunamadı.' });
-      return;
-    }
-
-    res.json({
-      success: true,
-      data: {
-        id: driver.id,
-        balance: Number(driver.balance ?? 0),
-      },
-    });
-  } catch {
     res.status(500).json({ success: false, error: 'Sürücü bakiyesi güncellenemedi.' });
   }
 });
 
 router.patch('/drivers/:id/access', async (req: Request, res: Response) => {
+  const id = req.params.id;
+  if (!isValidUUID(id)) {
+    res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID gerekli.' });
+    return;
+  }
+  const rawEnabled = (req.body as { enabled?: unknown }).enabled;
+  if (typeof rawEnabled !== 'boolean') {
+    res.status(400).json({ success: false, error: 'enabled boolean olmalıdır (true veya false).' });
+    return;
+  }
+
   try {
-    const id = req.params.id;
-    if (!isValidUUID(id)) {
-      res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID gerekli.' });
-      return;
-    }
-    const rawEnabled = (req.body as { enabled?: unknown }).enabled;
-    if (typeof rawEnabled !== 'boolean') {
-      res.status(400).json({ success: false, error: 'enabled boolean olmalıdır (true veya false).' });
-      return;
-    }
-    const enabled = rawEnabled;
-
-    const updateData = enabled
-      ? { is_available: true }
-      : { is_available: false, is_online: false };
-
-    const { data, error } = await supabaseAdmin
-      .from('drivers')
-      .update(updateData)
-      .eq('id', id)
-      .select('id, is_online, is_available')
-      .single();
-
-    if (error || !data) {
-      res.status(404).json({ success: false, error: 'Sürücü bulunamadı veya güncellenemedi.' });
-      return;
-    }
-
+    const data = await setAdminDriverAccess(id, rawEnabled);
     res.json({ success: true, data });
-  } catch {
+  } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
+      return;
+    }
     res.status(500).json({ success: false, error: 'Sürücü erişimi güncellenemedi.' });
   }
 });
