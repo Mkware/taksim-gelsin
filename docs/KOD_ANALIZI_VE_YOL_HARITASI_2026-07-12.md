@@ -47,11 +47,11 @@ Borçlar biliniyor; `problems.md` giderilen/açık maddeleri tablo halinde tutuy
 
 **Ciddi açıklar:**
 
-1. **SMS OTP yok.** Kayıtta telefon sahipliği doğrulanmıyor. Admin yetkisi `ADMIN_PHONES` listesindeki telefona bakıyor — admin henüz kayıt olmamışsa, numarasını bilen biri o numarayla kayıt olup **admin paneline erişebilir**. Üretim öncesi kapatılmalı.
-2. **HTTPS yok:** varsayılan origin `http://109.122.21.84:3000`. Şifreler ve JWT'ler düz metin gidiyor. Domain + TLS şart.
-3. **Refresh token DB'de düz metin** (`users.refresh_token`). Hash'lenerek saklanmalı.
+1. **SMS OTP yok.** Kayıtta telefon sahipliği doğrulanmıyor. Admin yetkisi `ADMIN_PHONES` listesindeki telefona bakıyor — admin henüz kayıt olmamışsa, numarasını bilen biri o numarayla kayıt olup **admin paneline erişebilir**. Üretim öncesi kapatılmalı. **Ertelendi (14 Tem 2026):** sağlayıcılar kurumsal marka/şirket kaydı istiyor, şu an elde yok.
+2. ~~HTTPS yok~~ — 13 Tem 2026'da çözüldü (`api.taksimgelsin.com`, domain + TLS kuruldu).
+3. ~~Refresh token DB'de düz metin~~ — 14 Tem 2026'da çözüldü: `users.refresh_token` artık SHA-256 hash olarak saklanıyor (`hashRefreshToken()`, `backend/src/utils/jwt.ts`). Not: bu değişiklik deploy edildiğinde mevcut oturumlardaki eski düz-metin token'lar DB'deki hash ile eşleşmeyeceği için geçersiz olur — tüm kullanıcılar bir kere daha giriş yapmak zorunda kalır (kabul edilebilir, henüz üretimde gerçek kullanıcı yok).
 
-**Küçükler:** pickup PIN `Math.random` (kriptografik değil), rate limiter `/api/v1/admin/*`'ı tamamen atlıyor (JWT var ama brute-force sınırsız), 10 MB JSON body limiti gereksiz büyük.
+**Küçükler:** pickup PIN `Math.random` (kriptografik değil), 10 MB JSON body limiti gereksiz büyük. ~~Rate limiter `/api/v1/admin/*`'ı tamamen atlıyor~~ — düzeltildi: global limiter admin'i atlasa da `admin.routes.ts` kendi `adminApiLimiter`'ını (120 istek/dk, auth+requireAdmin sonrası) zaten uyguluyormuş, bu analiz yanlış işaretlenmişti (14 Tem 2026'da doğrulandı, kod değişikliği gerekmedi).
 
 ### 5. Performans — Bu ölçek için yeterli
 
@@ -112,9 +112,9 @@ Yalnızca FCM (doğru karar — kimlik/DB/storage Supabase + backend'te). Backen
 
 ### Faz 1 — Üretim önü güvenlik (2–3 hafta)
 
-- [ ] 4. Domain + HTTPS (Nginx/Caddy reverse proxy), mobilde `SERVER_ORIGIN` https'e geçiş.
-- [ ] 5. SMS OTP ile telefon doğrulama (Netgsm/İleti Merkezi gibi yerli sağlayıcı) — admin telefonları kayıtlı olmadan canlıya çıkılmamalı.
-- [ ] 6. Refresh token'ları hash'leyerek sakla; admin route'larına ayrı rate limit.
+- [x] 4. Domain + HTTPS (Nginx/Caddy reverse proxy), mobilde `SERVER_ORIGIN` https'e geçiş. — 13 Tem 2026'da tamamlandı (`api.taksimgelsin.com`, bkz. sunucu-domain-tls memory).
+- [ ] 5. SMS OTP ile telefon doğrulama — **ertelendi**: sağlayıcılar (Netgsm/İleti Merkezi vb.) kurumsal marka/şirket kaydı istiyor, şu an elde yok. Admin telefonlarının kayıtsız-numara açığı bilinen risk olarak kalıyor; marka kaydı tamamlanınca yeniden ele alınacak.
+- [x] 6. Refresh token'ları hash'leyerek sakla; admin route'larına ayrı rate limit. — 14 Tem 2026: refresh token hash'leme yapıldı; admin rate limit zaten mevcutmuş (analiz hatası düzeltildi). Faz 1'in kalan tek maddesi SMS OTP (ertelendi).
 
 ### Faz 2 — Test güvenlik ağı (sürekli, ilk hedef 4–6 hafta)
 

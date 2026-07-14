@@ -3,6 +3,7 @@
  * Access token (15dk) ve Refresh token (30gün) üretimi ve doğrulaması.
  */
 
+import { createHash } from 'node:crypto';
 import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken';
 import { env } from '../config/env';
 
@@ -117,6 +118,17 @@ export function verifyRefreshToken(token: string): VerifyResult {
     const message = error instanceof Error ? error.message : 'Token doğrulama hatası';
     return { valid: false, error: message };
   }
+}
+
+/**
+ * Refresh token'ı DB'de saklamadan önce hash'ler (SHA-256, hex).
+ * Token zaten yüksek entropili bir JWT olduğundan tuzlamaya gerek yok;
+ * amaç DB dump'ında token'ın düz metin çalınmasını önlemek. Deterministik
+ * olması gerekiyor çünkü refreshTokens() gelen token'ın hash'ini DB'deki
+ * değerle birebir karşılaştırıyor (rotation güvenliği).
+ */
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 /**
