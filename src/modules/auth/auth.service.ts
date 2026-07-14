@@ -6,7 +6,7 @@
 
 import bcrypt from 'bcryptjs';
 import { supabaseAdmin } from '../../config/supabase';
-import { generateTokenPair, verifyRefreshToken, TokenPayload } from '../../utils/jwt';
+import { generateTokenPair, verifyRefreshToken, hashRefreshToken, TokenPayload } from '../../utils/jwt';
 import { logger } from '../../utils/logger';
 import { AppError } from '../../middleware/error.middleware';
 import { disconnectSocketsForUser, disconnectStaleSocketsForUser } from '../../sockets/socket.manager';
@@ -149,7 +149,7 @@ export async function registerCustomer(input: RegisterInput): Promise<AuthResult
   // Refresh token + oturum sürümü
   await supabaseAdmin
     .from('users')
-    .update({ refresh_token: tokens.refreshToken, session_version: 1 })
+    .update({ refresh_token: hashRefreshToken(tokens.refreshToken), session_version: 1 })
     .eq('id', user.id);
 
   logger.info(`Yeni müşteri kaydı: ${user.phone} (${user.id})`);
@@ -232,7 +232,7 @@ export async function registerDriver(input: DriverRegisterInput): Promise<Driver
 
   await supabaseAdmin
     .from('users')
-    .update({ refresh_token: tokens.refreshToken, session_version: 1 })
+    .update({ refresh_token: hashRefreshToken(tokens.refreshToken), session_version: 1 })
     .eq('id', user.id);
 
   logger.info(`Yeni sürücü kaydı: ${user.phone} (${user.id}), Plaka: ${vehicle_plate}`);
@@ -296,7 +296,7 @@ export async function login(input: LoginInput): Promise<AuthResult> {
 
   await supabaseAdmin
     .from('users')
-    .update({ refresh_token: tokens.refreshToken, session_version: nextSv })
+    .update({ refresh_token: hashRefreshToken(tokens.refreshToken), session_version: nextSv })
     .eq('id', user.id);
 
   // session_version cache'i invalidate et — middleware eski sürümü kullanmasın
@@ -349,8 +349,8 @@ export async function refreshTokens(refreshToken: string): Promise<AuthResult> {
     throw new AppError('Oturum geçersiz. Lütfen tekrar giriş yapın.', 401);
   }
 
-  // DB'deki refresh token ile gelen token eşleşmeli (token rotation güvenliği)
-  if (user.refresh_token !== refreshToken) {
+  // DB'deki refresh token hash'i ile gelen token'ın hash'i eşleşmeli (token rotation güvenliği)
+  if (user.refresh_token !== hashRefreshToken(refreshToken)) {
     // Token çalınmış olabilir — tüm token'ları geçersiz kıl
     logger.warn(`Şüpheli token yenileme girişimi: ${user.id}`);
     await supabaseAdmin
@@ -369,7 +369,7 @@ export async function refreshTokens(refreshToken: string): Promise<AuthResult> {
 
   await supabaseAdmin
     .from('users')
-    .update({ refresh_token: tokens.refreshToken })
+    .update({ refresh_token: hashRefreshToken(tokens.refreshToken) })
     .eq('id', user.id);
 
   logger.debug(`Token yenilendi: ${user.id}`);
