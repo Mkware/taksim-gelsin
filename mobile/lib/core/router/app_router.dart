@@ -9,7 +9,6 @@ import '../../screens/onboarding/onboarding_screen.dart';
 import '../../screens/auth/login_screen.dart';
 import '../../screens/auth/register_screen.dart';
 import '../../screens/auth/driver_register_screen.dart';
-import '../../screens/admin/admin_home_screen.dart';
 import '../../screens/customer/customer_home_screen.dart';
 import '../../screens/customer/ride_history_screen.dart';
 import '../../screens/driver/driver_home_screen.dart';
@@ -43,20 +42,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final isLoggedIn = ref.read(isLoggedInProvider);
       final userRole = ref.read(userRoleProvider);
-      final currentUser = ref.read(currentUserProvider);
 
       final isSplash = state.uri.path == '/splash';
       final isAuthRoute = state.uri.path.startsWith('/auth');
       final isLegalRoute = state.uri.path == '/legal';
       final isOnboardingRoute = state.uri.path == '/onboarding';
-      final isAdminRoute = state.uri.path == '/admin';
 
       // Splash ekranında yönlendirme yapma
       if (isSplash) return null;
 
       // Oturum açıkken tanıtım ekranına gerek yok
       if (isLoggedIn && isOnboardingRoute) {
-        if (currentUser?.isAdmin == true) return '/admin';
         return userRole == 'driver' ? '/driver' : '/customer';
       }
 
@@ -67,12 +63,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // Giriş yapmış ve auth sayfasındaysa → ana ekrana yönlendir
       if (isLoggedIn && isAuthRoute) {
-        if (currentUser?.isAdmin == true) return '/admin';
-        return userRole == 'driver' ? '/driver' : '/customer';
-      }
-
-      // Admin olmayan kullanıcı admin route'una giremez
-      if (isLoggedIn && isAdminRoute && currentUser?.isAdmin != true) {
         return userRole == 'driver' ? '/driver' : '/customer';
       }
 
@@ -111,11 +101,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           final t = int.tryParse(state.uri.queryParameters['tab'] ?? '') ?? 0;
           return LegalInformationScreen(initialTab: t);
         },
-      ),
-
-      GoRoute(
-        path: '/admin',
-        builder: (context, state) => const AdminHomeScreen(),
       ),
 
       // Müşteri ana ekranı

@@ -161,11 +161,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     }
     if (!mounted) return;
 
-    if (userAfterMe.isAdmin) {
-      context.go('/admin');
-    } else {
-      context.go(userAfterMe.isDriver ? '/driver' : '/customer');
-    }
+    context.go(userAfterMe.isDriver ? '/driver' : '/customer');
   }
 
   @override

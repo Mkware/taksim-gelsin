@@ -158,11 +158,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             );
 
         if (!mounted) return;
-        if (user.isAdmin) {
-          context.go('/admin');
-        } else {
-          context.go(user.isDriver ? '/driver' : '/customer');
-        }
+        context.go(user.isDriver ? '/driver' : '/customer');
       } else {
         setState(() {
           _errorMessage = response.data['error'] ?? 'Giriş başarısız.';

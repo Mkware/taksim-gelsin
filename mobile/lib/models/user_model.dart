@@ -5,7 +5,6 @@ class UserModel {
   final String fullName;
   final String? avatarUrl;
   final String role; // 'customer' | 'driver'
-  final bool isAdmin;
   final double rating;
   final int ratingCount;
   /// Sunucudan: tamamlanan yolculuk sayısı
@@ -24,7 +23,6 @@ class UserModel {
     required this.fullName,
     this.avatarUrl,
     required this.role,
-    this.isAdmin = false,
     this.rating = 5.0,
     this.ratingCount = 0,
     this.completedRides = 0,
@@ -69,7 +67,6 @@ class UserModel {
       fullName: _asString(json['full_name'] ?? json['fullName']),
       avatarUrl: json['avatar_url'] as String?,
       role: _asString(json['role']),
-      isAdmin: (json['is_admin'] ?? json['isAdmin']) == true,
       rating: _asDouble(json['rating'], fallback: 5.0),
       ratingCount: _asInt(json['rating_count'] ?? json['ratingCount']),
       completedRides:
@@ -95,7 +92,6 @@ class UserModel {
       'full_name': fullName,
       'avatar_url': avatarUrl,
       'role': role,
-      'is_admin': isAdmin,
       'rating': rating,
       'rating_count': ratingCount,
       'completed_rides': completedRides,
@@ -127,7 +123,6 @@ class UserModel {
       fullName: fullName ?? this.fullName,
       avatarUrl: avatarUrl ?? this.avatarUrl,
       role: role,
-      isAdmin: isAdmin,
       rating: rating ?? this.rating,
       ratingCount: ratingCount ?? this.ratingCount,
       completedRides: completedRides ?? this.completedRides,

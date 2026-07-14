@@ -61,13 +61,6 @@ class DriverPushRegistration {
     await _registerFcmIfNeeded(ref);
   }
 
-  /// Admin paneli — düşük puan ve duyuru push bildirimleri için token kaydı.
-  static Future<void> ensureRegisteredForAdmin(WidgetRef ref) async {
-    final user = ref.read(currentUserProvider);
-    if (user == null || !user.isAdmin || kIsWeb) return;
-    await _registerFcmIfNeeded(ref);
-  }
-
   static Future<void> _registerFcmIfNeeded(WidgetRef ref) async {
     if (_registrationInflight) return;
     _registrationInflight = true;
