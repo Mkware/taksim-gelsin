@@ -32,7 +32,7 @@ Bu belge, sistemin canlı ortama alınabilirliğini teknik açıdan özetler. So
 
 ## 2. Mimari özeti
 
-- **Backend:** Node 20+ (14 Tem 2026'da 18+'dan yükseltildi — vitest 4.x test tooling gereksinimi; üretim çalışma zamanı kodu Node 20'ye özgü bir şey kullanmıyor), TypeScript, Express, Socket.io; JWT + `session_version`; smart matching Redis üzerinde.
+- **Backend:** Node 22.19+ (14 Tem 2026'da 18+'dan yükseltildi — testcontainers/undici test tooling gereksinimi; üretim çalışma zamanı kodu Node'un yeni sürümlerine özgü bir şey kullanmıyor), TypeScript, Express, Socket.io; JWT + `session_version`; smart matching Redis üzerinde.
 - **Veri:** Supabase (PostgreSQL + PostGIS); migration’lar `supabase/migrations/` altında, **Supabase SQL editörü ile manuel** uygulanıyor (CLI yok).
 - **Mobil:** Tek Flutter binary; Riverpod + GoRouter; backend origin runtime’da değiştirilebilir (admin ekranı).
 - **Kritik dış bağımlılıklar:** Redis (eşleştirme, konum cache, session cache), Supabase, isteğe bağlı Google Distance Matrix, FCM (boşsa yalnızca socket).

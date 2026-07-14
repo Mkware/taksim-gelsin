@@ -17,8 +17,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # vitest 4.x en az Node 20 istiyor (node:util styleText — Node 18'de yok).
-          node-version: '20'
+          # testcontainers'ın bağımlılığı undici@8 en az Node 22.19 istiyor
+          # (vitest 4.x'in kendisi Node 20 yeterli olurdu, ama undici daha sıkı).
+          node-version: '22'
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci

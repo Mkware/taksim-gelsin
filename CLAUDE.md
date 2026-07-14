@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Five top-level workspaces in a single git repo, each independently buildable:
 
-- `backend/` — Node 20+ / TypeScript / Express + Socket.io API server (bumped from 18+ on 14 Tem 2026 — vitest 4.x requires Node ≥20).
+- `backend/` — Node 22.19+ / TypeScript / Express + Socket.io API server (bumped from 18+ on 14 Tem 2026 — testcontainers' `undici@8` dependency requires Node ≥22.19; production runtime code itself doesn't need anything Node 20+ specific).
 - `mobile/` — Flutter app (customer + driver + admin in one binary, role-routed).
 - `admin-panel/` — Vite + React + TypeScript admin web UI. Talks to the backend via `VITE_API_ORIGIN` (`.env.development` / `.env.production`, both gitignored).
 - `web/` — Astro marketing/legal site (landing page, gizlilik/kvkk/kullanım koşulları, sürücü sayfası).
