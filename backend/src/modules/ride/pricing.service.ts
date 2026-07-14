@@ -1,34 +1,38 @@
 /**
- * Ücret Hesaplama Servisi — Kırıkkale ili taksi tarifesi (şimdilik sabit).
+ * Ücret Hesaplama Servisi — Kırıkkale ili taksi tarifesi.
  *
- * Tarife:
+ * Tarife sayısal değerleri (açılış, km başı, taksimetre tabanı, bekleme) artık
+ * `platform_settings` tablosunda (admin panelinden değiştirilebilir, `.env`
+ * yalnızca boş bir DB için bootstrap varsayılanı) — bkz. platform_settings.service.ts.
+ * Deploy gerekmeden değiştirilebilir hale getirmek için 15 Tem 2026'da buradan
+ * taşındı (Faz 3, madde 12).
+ *
+ * Varsayılan tarife (DB satırı yoksa):
  *   Açılış ücreti     : 50 TL
  *   KM başı ücret     : 50 TL (hareket)
  *   Minimum ücret     : 150 TL (taksimetre tabanı)
  *   Bekleme (hareket yok): 3 TL / dakika
  *
  * Tahmini yol ücreti (rota km bilindiğinde):
- *   max(150, 50 + km × 50)
+ *   max(minimumFare, baseFare + km × perKmRate)
  *
  * Bekleme ücreti yolculuk sırasında (durunca) eklenir; ön tahmine dahil değildir.
  */
 
-const BASE_FARE = 50;
-const PER_KM_RATE = 50;
-const MINIMUM_FARE = 150;
-/** Taksi hareket etmediğinde dakika başı (TL) */
-const WAITING_RATE_PER_MINUTE = 3;
+import { getPlatformSettings } from '../../services/platform_settings.service';
 
 /**
  * Mesafeye göre tahmini ücret (bekleme hariç)
  */
 export function calculatePrice(distanceKm: number): number {
+  const { tariffBaseFare, tariffPerKmRate, tariffMinimumFare } = getPlatformSettings();
+
   if (distanceKm <= 0) {
-    return MINIMUM_FARE;
+    return tariffMinimumFare;
   }
 
-  const calculated = BASE_FARE + distanceKm * PER_KM_RATE;
-  const price = Math.max(MINIMUM_FARE, calculated);
+  const calculated = tariffBaseFare + distanceKm * tariffPerKmRate;
+  const price = Math.max(tariffMinimumFare, calculated);
   return Math.round(price * 100) / 100;
 }
 
@@ -37,7 +41,8 @@ export function calculatePrice(distanceKm: number): number {
  */
 export function calculateWaitingCharge(waitingMinutes: number): number {
   if (waitingMinutes <= 0) return 0;
-  return Math.round(waitingMinutes * WAITING_RATE_PER_MINUTE * 100) / 100;
+  const { tariffWaitingRatePerMinute } = getPlatformSettings();
+  return Math.round(waitingMinutes * tariffWaitingRatePerMinute * 100) / 100;
 }
 
 export function getPriceBreakdown(distanceKm: number): {
@@ -46,12 +51,13 @@ export function getPriceBreakdown(distanceKm: number): {
   totalPrice: number;
   distanceKm: number;
 } {
+  const { tariffPerKmRate } = getPlatformSettings();
   const distanceFare =
-    distanceKm > 0 ? Math.round(distanceKm * PER_KM_RATE * 100) / 100 : 0;
+    distanceKm > 0 ? Math.round(distanceKm * tariffPerKmRate * 100) / 100 : 0;
   const totalPrice = calculatePrice(distanceKm);
 
   return {
-    baseFare: BASE_FARE,
+    baseFare: getPlatformSettings().tariffBaseFare,
     distanceFare,
     totalPrice,
     distanceKm: Math.round(distanceKm * 100) / 100,
@@ -67,11 +73,13 @@ export function getTariffInfo(): {
   city: string;
   region: string;
 } {
+  const { tariffBaseFare, tariffPerKmRate, tariffMinimumFare, tariffWaitingRatePerMinute } =
+    getPlatformSettings();
   return {
-    baseFare: BASE_FARE,
-    perKmRate: PER_KM_RATE,
-    minimumFare: MINIMUM_FARE,
-    waitingRatePerMinute: WAITING_RATE_PER_MINUTE,
+    baseFare: tariffBaseFare,
+    perKmRate: tariffPerKmRate,
+    minimumFare: tariffMinimumFare,
+    waitingRatePerMinute: tariffWaitingRatePerMinute,
     currency: 'TRY',
     city: 'Kırıkkale',
     region: 'Kırıkkale ili',

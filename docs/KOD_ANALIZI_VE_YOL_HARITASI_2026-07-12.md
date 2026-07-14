@@ -38,7 +38,7 @@ Borçlar biliniyor; `problems.md` giderilen/açık maddeleri tablo halinde tutuy
 1. **Sıfır otomatik test + CI yok** (en büyük borç).
 2. **Versiyon kontrolü kırık:** repo kökü ve `backend/` git deposu değil; yalnızca `mobile/` içinde bir `.git` var. Klasör adı "yedek kopyası 2". `problems.md` "git geçmişine bakın" diyor ama bu kopyada geçmiş yok.
 3. Manuel SQL migration'lar (SQL editöründen elle, `002_` çakışan numaralar) — uygulanmış/uygulanmamış takibi insan hafızasında.
-4. Tarife (`pricing.service.ts`) kodda sabit: 50 TL açılış / 50 TL-km / 150 TL taban / 3 TL-dk bekleme. Diğer ayarlar `platform_settings`'e taşınmışken tarife taşınmamış — tarife değişikliği deploy gerektirir, çok-şehirli modeli bloke eder.
+4. ~~Tarife (`pricing.service.ts`) kodda sabit~~ — 15 Tem 2026'da `platform_settings`'e taşındı (madde 12). Çok-şehirlilik (Faz 4, madde 13) hâlâ ayrı bir iş: şemada `city` boyutu yok, tek bir global tarife var.
 5. Mobil dev ekranlar (madde 2'deki dosyalar).
 
 ### 4. Güvenlik — Temel sağlam, üç ciddi açık
@@ -138,7 +138,7 @@ Yani ikisi de daha önce SQL editöründen elle düzeltilmiş/eklenmiş ama migr
 - [x] 9. Migration'ları takip edilebilir yap. — 14 Tem 2026: Supabase CLI yerine (mevcut "SQL editöründen elle" akışını bozmayan) hafif bir `schema_migrations` tablosu (`010_schema_migrations.sql`) + kural — her yeni migration dosyası kendini `INSERT ... ON CONFLICT DO NOTHING` ile bu tabloya kaydeder, ayrı bir adım unutulamaz. `backend/npm run check-migrations` yerel dosyalarla canlı tabloyu karşılaştırıp sapmayı raporluyor (salt-okunur). Süreçte bulunan `backend/scripts/add_session_version.sql` (ad-hoc, hiç migration'a dönüşmemiş) silindi, `009_user_session_version.sql` onun yerini aldı. **⚠️ 009 ve 010 canlı Supabase'de henüz uygulanmadı — SQL editöründen elle çalıştırılmaları gerekiyor** (009 zaten no-op çünkü kolon var; 010 tabloyu ilk kez oluşturuyor).
 - [x]/[ ] 10. Mobilde "dokunduğun ekranı böl" kuralı. — 15 Tem 2026: bu maddenin en büyük kalemi (`admin_home_screen.dart`, 3.526 satır) bölmeye gerek kalmadan tamamen ortadan kalktı — admin paneli webe taşındı (`panel.taksimgelsin.com`), mobildeki admin ekranı/route'u/API metodları/`UserModel.isAdmin` silindi (bkz. CLAUDE.md). Kalan: `driver_home_screen.dart` (1.554 satır) hâlâ bölünmedi, `providers.dart` (506 satır) hâlâ tek dosyada.
 - [x] 11. `admin.routes.ts`'i controller/service desenine çek; `matching.service.old.ts`'i sil. — 15 Tem 2026: sürücü CRUD'u (`admin_drivers.service.ts`) ve genel bakış (`admin_overview.service.ts`) yeni servis dosyalarına çıkarıldı (1.028 → 778 satır); rides/customers/reviews/live-ops zaten daha önce ayrılmıştı. `matching.service.old.ts` silindi (kimse import etmiyordu), `eslint.config.mjs`'deki muafiyet kaydı da kaldırıldı.
-- [ ] 12. Tarifeyi `platform_settings`'e taşı.
+- [x] 12. Tarifeyi `platform_settings`'e taşı. — 15 Tem 2026: `tariffBaseFare`/`tariffPerKmRate`/`tariffMinimumFare`/`tariffWaitingRatePerMinute` `platform_settings.service.ts`'e eklendi, `pricing.service.ts` artık sabit yerine `getPlatformSettings()` okuyor. `011_platform_settings_tariff.sql` (dokümantasyon amaçlı, şema değişikliği yok — settings zaten JSONB). admin-panel'in Ayarlar sayfasına da 4 yeni alan eklendi, admin artık deploy gerekmeden tarife değiştirebiliyor. **Faz 3 tamamlandı.**
 
 ### Faz 4 — Türkiye ölçeği hazırlığı (büyümeden önce)
 

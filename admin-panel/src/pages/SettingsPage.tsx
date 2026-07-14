@@ -105,6 +105,35 @@ function PlatformSettingsSection() {
           onChange={(v) => setForm({ ...form, driverResponseTimeoutSeconds: Number(v) || 0 })}
         />
       </SimpleGrid>
+      <Title order={5} mt="lg" mb="xs">
+        Taksi Tarifesi
+      </Title>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+        <NumberInput
+          label="Açılış ücreti (TL)"
+          min={0}
+          value={form.tariffBaseFare}
+          onChange={(v) => setForm({ ...form, tariffBaseFare: Number(v) || 0 })}
+        />
+        <NumberInput
+          label="KM başı ücret (TL)"
+          min={0}
+          value={form.tariffPerKmRate}
+          onChange={(v) => setForm({ ...form, tariffPerKmRate: Number(v) || 0 })}
+        />
+        <NumberInput
+          label="Taksimetre tabanı — minimum ücret (TL)"
+          min={0}
+          value={form.tariffMinimumFare}
+          onChange={(v) => setForm({ ...form, tariffMinimumFare: Number(v) || 0 })}
+        />
+        <NumberInput
+          label="Bekleme — dakika başı (TL)"
+          min={0}
+          value={form.tariffWaitingRatePerMinute}
+          onChange={(v) => setForm({ ...form, tariffWaitingRatePerMinute: Number(v) || 0 })}
+        />
+      </SimpleGrid>
       <Switch
         mt="md"
         label="Kart ile bakiye yükleme simülasyonu (yalnızca test ortamı)"

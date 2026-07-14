@@ -32,6 +32,10 @@ function envDefaults(): PlatformOperationalSettings {
       180,
     ),
     walletCardSimulationEnabled: env.WALLET_CARD_SIMULATION_ENABLED,
+    tariffBaseFare: Number(process.env.TARIFF_BASE_FARE ?? 50),
+    tariffPerKmRate: Number(process.env.TARIFF_PER_KM_RATE ?? 50),
+    tariffMinimumFare: Number(process.env.TARIFF_MINIMUM_FARE ?? 150),
+    tariffWaitingRatePerMinute: Number(process.env.TARIFF_WAITING_RATE_PER_MINUTE ?? 3),
   };
 }
 
@@ -46,6 +50,14 @@ export type PlatformSettingsPatch = Partial<{
   /** Sürücünün gelen çağrıya yanıt penceresi (sn) — eşleştirme timeout ile aynı. */
   driverResponseTimeoutSeconds: number;
   walletCardSimulationEnabled: boolean;
+  /** Açılış ücreti (TL) — bkz. modules/ride/pricing.service.ts */
+  tariffBaseFare: number;
+  /** KM başı ücret (TL) */
+  tariffPerKmRate: number;
+  /** Taksimetre tabanı — hesaplanan ücret bunun altındaysa buna yuvarlanır (TL) */
+  tariffMinimumFare: number;
+  /** Bekleme (hareketsizlik) — dakika başı (TL) */
+  tariffWaitingRatePerMinute: number;
 }>;
 
 export interface PlatformOperationalSettings {
@@ -56,6 +68,10 @@ export interface PlatformOperationalSettings {
   drivingDistanceCacheTtlSec: number;
   driverResponseTimeoutSeconds: number;
   walletCardSimulationEnabled: boolean;
+  tariffBaseFare: number;
+  tariffPerKmRate: number;
+  tariffMinimumFare: number;
+  tariffWaitingRatePerMinute: number;
 }
 
 let cache: PlatformOperationalSettings | null = null;
@@ -91,6 +107,14 @@ function mergeFromDbRow(raw: Record<string, unknown> | null | undefined): Platfo
       180,
     ),
     walletCardSimulationEnabled: bool(raw.walletCardSimulationEnabled, d.walletCardSimulationEnabled),
+    tariffBaseFare: clamp(num(raw.tariffBaseFare, d.tariffBaseFare), 0, 10_000),
+    tariffPerKmRate: clamp(num(raw.tariffPerKmRate, d.tariffPerKmRate), 0, 10_000),
+    tariffMinimumFare: clamp(num(raw.tariffMinimumFare, d.tariffMinimumFare), 0, 10_000),
+    tariffWaitingRatePerMinute: clamp(
+      num(raw.tariffWaitingRatePerMinute, d.tariffWaitingRatePerMinute),
+      0,
+      1_000,
+    ),
   };
 }
 
@@ -179,6 +203,14 @@ export async function updatePlatformSettings(
     ),
     walletCardSimulationEnabled:
       patch.walletCardSimulationEnabled ?? base.walletCardSimulationEnabled,
+    tariffBaseFare: clamp(Number(patch.tariffBaseFare ?? base.tariffBaseFare), 0, 10_000),
+    tariffPerKmRate: clamp(Number(patch.tariffPerKmRate ?? base.tariffPerKmRate), 0, 10_000),
+    tariffMinimumFare: clamp(Number(patch.tariffMinimumFare ?? base.tariffMinimumFare), 0, 10_000),
+    tariffWaitingRatePerMinute: clamp(
+      Number(patch.tariffWaitingRatePerMinute ?? base.tariffWaitingRatePerMinute),
+      0,
+      1_000,
+    ),
   };
 
   const settingsJson = {
@@ -189,6 +221,10 @@ export async function updatePlatformSettings(
     drivingDistanceCacheTtlSec: next.drivingDistanceCacheTtlSec,
     driverResponseTimeoutSeconds: next.driverResponseTimeoutSeconds,
     walletCardSimulationEnabled: next.walletCardSimulationEnabled,
+    tariffBaseFare: next.tariffBaseFare,
+    tariffPerKmRate: next.tariffPerKmRate,
+    tariffMinimumFare: next.tariffMinimumFare,
+    tariffWaitingRatePerMinute: next.tariffWaitingRatePerMinute,
   };
 
   const { error } = await supabaseAdmin.from('platform_settings').upsert(

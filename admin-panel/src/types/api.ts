@@ -191,6 +191,14 @@ export interface PlatformSettings {
   drivingDistanceCacheTtlSec: number;
   driverResponseTimeoutSeconds: number;
   walletCardSimulationEnabled: boolean;
+  /** Açılış ücreti (TL) */
+  tariffBaseFare: number;
+  /** KM başı ücret (TL) */
+  tariffPerKmRate: number;
+  /** Taksimetre tabanı (TL) */
+  tariffMinimumFare: number;
+  /** Bekleme — dakika başı (TL) */
+  tariffWaitingRatePerMinute: number;
 }
 
 export interface PricingSettings {
