@@ -135,7 +135,7 @@ Yani ikisi de daha önce SQL editöründen elle düzeltilmiş/eklenmiş ama migr
 
 ### Faz 3 — Yapısal borç ödeme (özellik geliştirmeyle paralel)
 
-- [ ] 9. Migration'ları takip edilebilir yap (Supabase CLI veya en az bir `schema_migrations` tablosu).
+- [x] 9. Migration'ları takip edilebilir yap. — 14 Tem 2026: Supabase CLI yerine (mevcut "SQL editöründen elle" akışını bozmayan) hafif bir `schema_migrations` tablosu (`010_schema_migrations.sql`) + kural — her yeni migration dosyası kendini `INSERT ... ON CONFLICT DO NOTHING` ile bu tabloya kaydeder, ayrı bir adım unutulamaz. `backend/npm run check-migrations` yerel dosyalarla canlı tabloyu karşılaştırıp sapmayı raporluyor (salt-okunur). Süreçte bulunan `backend/scripts/add_session_version.sql` (ad-hoc, hiç migration'a dönüşmemiş) silindi, `009_user_session_version.sql` onun yerini aldı. **⚠️ 009 ve 010 canlı Supabase'de henüz uygulanmadı — SQL editöründen elle çalıştırılmaları gerekiyor** (009 zaten no-op çünkü kolon var; 010 tabloyu ilk kez oluşturuyor).
 - [ ] 10. Mobilde "dokunduğun ekranı böl" kuralı: `admin_home_screen.dart`'tan başlayarak feature-klasörlü yapıya kademeli geçiş; provider'ları dosyalara ayır.
 - [ ] 11. `admin.routes.ts`'i controller/service desenine çek; `matching.service.old.ts`'i sil (git geçmişi artık referans olur).
 - [ ] 12. Tarifeyi `platform_settings`'e taşı.
