@@ -106,9 +106,9 @@ Yalnızca FCM (doğru karar — kimlik/DB/storage Supabase + backend'te). Backen
 
 ### Faz 0 — Zemin (hemen, ~1 hafta)
 
-- [ ] 1. Repo kökünü git'e al (backend + supabase + mobile tek monorepo; `mobile/.git` durumu netleştirilip birleştirilmeli), GitHub'a push.
-- [ ] 2. Bozuk `lint` script'ini onar (eslint kur + config) ve `flutter analyze` ile birlikte GitHub Actions CI'ına bağla (`tsc --noEmit` + lint + `flutter test`).
-- [ ] 3. Ölü bağımlılıkları temizle (`firebase_auth`), CLAUDE.md'yi gerçek durumla eşitle (codegen iddiası).
+- [x] 1. Repo kökünü git'e al (backend + supabase + mobile tek monorepo), GitHub'a push. — 13 Tem 2026 (`5281604 Monorepo başlangıcı`).
+- [x] 2. Bozuk `lint` script'ini onar (eslint kur + config) ve `flutter analyze` ile birlikte GitHub Actions CI'ına bağla. — 13 Tem 2026 (`9f6dc2e`), 14 Tem 2026'da `npm test` de eklendi.
+- [x] 3. Ölü bağımlılıkları temizle (`firebase_auth`), CLAUDE.md'yi gerçek durumla eşitle (codegen iddiası). — 13 Tem 2026 (`9f6dc2e`).
 
 ### Faz 1 — Üretim önü güvenlik (2–3 hafta)
 
