@@ -42,6 +42,9 @@ import {
 
 const MAX_DRIVERS_PER_RIDE       = 5;
 const SEARCH_RADIUS_METERS       = 5_000;
+/** Skorun (puan/kabul oranı/adalet) fiilen devreye girmesi için mesafe bandı genişliği.
+ *  Bu bant içindeki sürücüler arasında en yakın metre değil, en iyi skor kazanır. */
+const DISTANCE_BAND_M            = 400;
 /** Ağ gecikmesi / son saniye kabul için sunucu timeout’u admin süresinden biraz uzun tutulur (UI deadline aynı). */
 const DRIVER_RESPONSE_END_GRACE_MS = 400;
 const QUEUE_TTL_S                = 300;
@@ -101,7 +104,7 @@ interface MatchingContext {
 
 // ─── Tip Tanımları ────────────────────────────────────────────────────────────
 
-interface NearbyDriver {
+export interface NearbyDriver {
   id          : string;
   lat         : number;
   lng         : number;
@@ -219,11 +222,15 @@ async function isDriverBannedTemporarily(driverId: string): Promise<boolean> {
  * - DB'de hâlâ is_online + is_available olmayanları çıkarır
  * - Başka bir yolculuk için aktif `pending_offer` kilidi olanları çıkarır (bu ride değilse)
  * - Redis'te `driver:socket:{id}` yoksa çıkarır (DB online ama uygulama bağlı değil)
+ *
+ * Generic: Google Distance Matrix çağrısından ÖNCE (ham RPC adaylarına, henüz sürüş
+ * mesafesi hesaplanmamışken) veya sonra çağrılabilsin diye yalnızca `id` alanına
+ * bağımlı — `distance_m` gerektirmiyor.
  */
-async function filterCandidatesForRide(
-  drivers: NearbyDriver[],
+async function filterCandidatesForRide<T extends { id: string }>(
+  drivers: T[],
   rideId: string,
-): Promise<NearbyDriver[]> {
+): Promise<T[]> {
   if (drivers.length === 0) return [];
 
   const ids = [...new Set(drivers.map((d) => d.id))];
@@ -265,8 +272,8 @@ async function filterCandidatesForRide(
 
   const lockChecks = await Promise.all(
     drivers.map(async (d): Promise<
-      | { d: NearbyDriver; keep: true }
-      | { d: NearbyDriver; keep: false; reason: 'db' | 'lock' | 'socket'; otherRide?: string }
+      | { d: T; keep: true }
+      | { d: T; keep: false; reason: 'db' | 'lock' | 'socket'; otherRide?: string }
     > => {
       if (!allowed.has(d.id)) {
         return { d, keep: false, reason: 'db' };
@@ -283,7 +290,7 @@ async function filterCandidatesForRide(
     }),
   );
 
-  const out: NearbyDriver[] = [];
+  const out: T[] = [];
   for (const c of lockChecks) {
     if (c.keep) {
       out.push(c.d);
@@ -362,7 +369,8 @@ async function applyAcceptanceRecord(driverId: string): Promise<void> {
 
 // ─── ANA SKORLAMA FONKSİYONU ──────────────────────────────────────────────────
 
-async function scoreAndRankDrivers(
+/** Testler için dışa açık — mesafe bandı + skor sıralamasının davranışını doğrudan doğrulamak için. */
+export async function scoreAndRankDrivers(
   drivers     : NearbyDriver[],
   rejectedIds : Set<string>,
 ): Promise<ScoredDriver[]> {
@@ -418,18 +426,23 @@ async function scoreAndRankDrivers(
     return { ...driver, stats, score, scoreBreakdown: breakdown };
   });
 
-  // Önce mesafe (en yakın müşteriye) — taksi dağıtımında beklenen davranış.
-  // Mesafe pratikte eşit değilse skor ikincil; tam eşit mesafede skor.
+  // Mesafe bandına göre sırala (DISTANCE_BAND_M genişliğinde), bant içinde skor belirleyici.
+  // Önceki sürüm ham metreyle sıralıyordu ve yalnızca 1 metreden az fark varsa skora
+  // bakıyordu — pratikte iki sürücü neredeyse hiç bu kadar yakın çıkmadığından skor
+  // (puan, kabul oranı, günlük yolculuk adaleti) fiilen hiçbir zaman devreye girmiyordu.
+  // Bant genişse "en yakın önce" sezgisi korunur; aynı banttaki adaylar arasında ise
+  // en iyi profil öne çıkar.
   scored.sort((a, b) => {
-    const distDiff = a.distance_m - b.distance_m;
-    if (Math.abs(distDiff) >= 1) {
-      return distDiff;
+    const bandA = Math.floor(a.distance_m / DISTANCE_BAND_M);
+    const bandB = Math.floor(b.distance_m / DISTANCE_BAND_M);
+    if (bandA !== bandB) {
+      return bandA - bandB;
     }
     const byScore = b.score - a.score;
     if (Math.abs(byScore) > 1e-6) {
       return byScore;
     }
-    return distDiff;
+    return a.distance_m - b.distance_m;
   });
 
   logger.info('[SmartMatching] Driver ranking:', scored.map(d => ({
@@ -520,7 +533,7 @@ export async function startSmartMatching(
     return;
   }
 
-  // PostGIS / RPC ile kuş uçumu çemberinden adaylar — sıralama için yol mesafesi (Distance Matrix + fallback Haversine)
+  // PostGIS / RPC ile kuş uçumu çemberinden ham adaylar
   const parsed: ParsedNearbyDriver[] = nearbyRaw.map((d: Record<string, unknown>) => {
     const id = String(d.id ?? d.driver_id ?? '');
     const lat = Number(d.lat ?? d.lat_out ?? 0);
@@ -534,8 +547,19 @@ export async function startSmartMatching(
     };
   });
 
+  // Online/müsait/bakiye/canlı-socket/kilit filtresi EN BAŞTA — Google Distance Matrix'e
+  // (ücretli) yalnızca gerçekten teklif gönderilebilecek adaylar gönderilsin. Önceden bu
+  // filtre Matrix çağrısından SONRA yapılıyordu; elenecek adaylar için de Matrix'e ödeme
+  // yapılmış oluyordu.
+  const parsedEligible = await filterCandidatesForRide(parsed, rideId);
+  if (parsedEligible.length === 0) {
+    logger.warn(`[SmartMatching] No eligible drivers after DB/Redis filter for ride ${rideId}`);
+    await handleNoDriversAvailable(rideId, customerId);
+    return;
+  }
+
   // Önce kuş uçumuna göre sırala — Google Matrix yalnızca en yakın N adaya (maliyet ↓, performans ↑)
-  const withAir: ParsedWithAir[] = parsed.map((p) => ({
+  const withAir: ParsedWithAir[] = parsedEligible.map((p) => ({
     ...p,
     air_m: haversineDistance(pickupLat, pickupLng, p.lat, p.lng) * 1000,
   }));
@@ -559,19 +583,12 @@ export async function startSmartMatching(
       haversineDistance(pickupLat, pickupLng, p.lat, p.lng) * 1000,
   }));
 
-  const nearbyEligible = await filterCandidatesForRide(nearby, rideId);
-  if (nearbyEligible.length === 0) {
-    logger.warn(`[SmartMatching] No eligible drivers after DB/Redis filter for ride ${rideId}`);
-    await handleNoDriversAvailable(rideId, customerId);
-    return;
-  }
-
   // 2. Reddeden sürücüleri Redis'ten yükle
   const rejectedRaw = await redis.smembers(REDIS_KEYS.rejected(rideId));
   const rejectedIds = new Set(rejectedRaw);
 
-  // 3. Skor hesapla ve sırala (kuyruk: en yakın önce)
-  const ranked = await scoreAndRankDrivers(nearbyEligible, rejectedIds);
+  // 3. Skor hesapla ve sırala (mesafe bandı + skor — bkz. scoreAndRankDrivers)
+  const ranked = await scoreAndRankDrivers(nearby, rejectedIds);
 
   if (ranked.length === 0) {
     await handleNoDriversAvailable(rideId, customerId);
