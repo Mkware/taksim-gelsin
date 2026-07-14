@@ -49,9 +49,9 @@ const TIMEOUT_PENALTY_TTL_S      = 600;   // 10 dk bant dışı (3 art arda time
 const CONSECUTIVE_TIMEOUT_LIMIT  = 3;     // kaç art arda timeout → bant dışı
 
 /** driver.handler ile aynı — canlı socket eşlemesi (hayalet çevrimiçi filtre) */
-const DRIVER_SOCKET_KEY = 'driver:socket:';
+export const DRIVER_SOCKET_KEY = 'driver:socket:';
 /** Sürücü başına aktif teklif kilidi prefix'i (Lua içinde de kullanılır). */
-const DRIVER_PENDING_OFFER_PREFIX = 'driver:pending_offer:';
+export const DRIVER_PENDING_OFFER_PREFIX = 'driver:pending_offer:';
 
 // Ağırlıklar (toplam = 1.0)
 const WEIGHTS = {
@@ -63,7 +63,8 @@ const WEIGHTS = {
 
 // ─── Redis Anahtar Şablonları ─────────────────────────────────────────────────
 
-const REDIS_KEYS = {
+/** Testlerde kuyruk/kilit durumunu doğrudan Redis'te kurmak/okumak için dışa açık. */
+export const REDIS_KEYS = {
   matchingQueue    : (rideId: string) => `ride:matching:${rideId}`,
   matchingQueuedTotal: (rideId: string) => `ride:matching:queued_total:${rideId}`,
   matchingAskedCount : (rideId: string) => `ride:matching:asked:${rideId}`,
@@ -84,7 +85,7 @@ const REDIS_KEYS = {
  * süresi dolan teklifleri Redis'ten okuyup atomik claim ile sıradaki sürücüye ilerletir.
  * Böylece in-memory timer kaybolsa bile eşleştirme saniyeler içinde devam eder.
  */
-const OFFER_DEADLINES_ZSET = 'ride:offer:deadlines';
+export const OFFER_DEADLINES_ZSET = 'ride:offer:deadlines';
 const offerMember = (rideId: string, driverId: string): string => `${rideId}::${driverId}`;
 const parseOfferMember = (member: string): { rideId: string; driverId: string } | null => {
   const idx = member.indexOf('::');
@@ -661,7 +662,8 @@ const ACQUIRE_NEXT_DRIVER_LUA = `
   end
 `;
 
-async function acquireNextDriver(
+/** Testler için dışa açık — ACQUIRE_NEXT_DRIVER_LUA'nın atomiklik garantilerini doğrudan doğrulamak için. */
+export async function acquireNextDriver(
   rideId: string,
   ttlSeconds: number,
   uiDeadlineMs: number,
