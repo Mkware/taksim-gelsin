@@ -10,6 +10,7 @@ import '../../core/utils/location_permission_util.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/map_marker_icons.dart';
 import '../../core/widgets/breathing_dot.dart';
+import '../../core/widgets/online_scan_bar.dart';
 import '../../models/ride_model.dart' hide LatLng;
 import '../../providers/providers.dart';
 import '../../services/directions_service.dart';
@@ -1085,7 +1086,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
             ),
           ),
 
-          // Üst çubuk
+          // Üst çubuk (altında çevrimiçi tarayıcı bar)
           Positioned(
             top: MediaQuery.of(context).padding.top + 10,
             left: 16,
@@ -1143,6 +1144,20 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
 
   // ---------- TOP BAR ----------
   Widget _buildTopBar(dynamic user, bool isOnline) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildTopBarRow(user, isOnline),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: OnlineScanBar(active: isOnline, color: AppTheme.success),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTopBarRow(dynamic user, bool isOnline) {
     return Row(
       children: [
         // Profil — hero
