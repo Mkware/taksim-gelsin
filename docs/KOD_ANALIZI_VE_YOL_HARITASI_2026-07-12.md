@@ -118,7 +118,9 @@ Yalnızca FCM (doğru karar — kimlik/DB/storage Supabase + backend'te). Backen
 
 ### Faz 2 — Test güvenlik ağı (sürekli, ilk hedef 4–6 hafta)
 
-- [ ] 7. Backend'e vitest/jest + testcontainers (Postgres+PostGIS, Redis). İlk testler para ve durum makinesine: `accept_ride_with_fee` yarışları, refund idempotency, ride status geçişleri, session_version akışı.
+- [x] 7a. Backend'e vitest + testcontainers (Postgres+PostGIS) kuruldu (14 Tem 2026) — `backend/tests/`, CI'ya `npm test` eklendi. İlk testler: `accept_ride_with_fee` yarışları (eşzamanlı iki sürücü), yetersiz bakiyede tam rollback, `refund_ride_accept_fee` idempotency. Bu süreçte gerçek bir migration hatası bulundu ve düzeltildi: `007_wallet_ledger_atomic_accept.sql`, `deduct_driver_balance`'ı `VOID`'dan `BOOLEAN`'a `CREATE OR REPLACE` ile değiştirmeye çalışıyordu (Postgres buna izin vermiyor, önce `DROP` şart) — **canlı Supabase projesinde bu fonksiyonun gerçekten `BOOLEAN` döndürüp döndürmediği doğrulanmalı**, sıfırdan bir ortamda migration'lar sırayla uygulansa bu adımda patlardı.
+- [ ] 7b. Kalan kritik testler: ride status geçişleri (searching → accepted → arriving → in_progress → completed), session_version akışı (çoklu cihaz oturum kesme).
+- [ ] 7c. Redis testcontainer kurulumu (`@testcontainers/redis` zaten devDependency olarak eklendi, henüz kullanan test yok) — `smart_matching.service.ts`'nin Lua atomik claim mantığı için.
 - [ ] 8. Kritik Socket akışları için entegrasyon testi (istek → teklif → timeout → sıradaki sürücü).
 
 ### Faz 3 — Yapısal borç ödeme (özellik geliştirmeyle paralel)

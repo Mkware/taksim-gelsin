@@ -29,11 +29,14 @@ npm run dev      # ts-node-dev hot-reload on src/server.ts
 npm run build    # tsc → dist/
 npm start        # node dist/server.js (production)
 npm run lint     # eslint src/ --ext .ts (flat config: backend/eslint.config.mjs)
+npm test         # vitest run — tests/ integration suite (testcontainers)
 ```
 
-There is no test runner configured (planned for a later hardening phase).
+Tests live under `backend/tests/` (separate from `src/`, not part of the `tsc` build — `tsconfig.json`'s `include` only covers `src/`). `tests/integration/*.test.ts` spin up a real Postgres+PostGIS container via testcontainers (`@testcontainers/postgresql`, image `postgis/postgis:16-3.4`) and replay every forward migration from `supabase/migrations/` (`tests/support/db.ts` skips `*_revert.sql` and `*_seed_data.sql`, and stubs Supabase's `auth.uid()`/`auth.role()` + `anon`/`authenticated`/`service_role` roles since those don't exist on vanilla Postgres — migrations reference them in RLS policies/GRANTs). Tests call SQL functions (e.g. `accept_ride_with_fee`) directly over a `pg` connection, bypassing the app's `supabase-js` layer entirely — the goal is verifying the SQL functions' own guarantees (money/state-machine correctness), which is where the highest-value logic lives (see `007_wallet_ledger_atomic_accept.sql`). `tests/support/fixtures.ts` has minimal `insertCustomer`/`insertDriver`/`insertSearchingRide` helpers — extend rather than duplicate raw SQL inserts.
 
-CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` + `npm run lint` on every push/PR to `main`, alongside a mobile job (`flutter analyze` + `flutter test`).
+**Running locally requires Docker.** On macOS without Docker Desktop, [colima](https://github.com/abiosoft/colima) works (`brew install colima docker`, `colima start`), but its VM-forwarded socket breaks testcontainers' Ryuk reaper container (bind-mount error) — run with `TESTCONTAINERS_RYUK_DISABLED=true DOCKER_HOST="unix://$HOME/.colima/default/docker.sock" npm test`. Plain Docker Desktop or Linux/CI (GitHub Actions `ubuntu-latest` ships Docker already) need neither workaround.
+
+CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` + `npm run lint` + `npm test` on every push/PR to `main`, alongside a mobile job (`flutter analyze` + `flutter test`).
 
 A `.env` is required at `backend/.env`; copy `backend/.env.example` and fill in Supabase, Redis, JWT, FCM, and `ADMIN_PHONES`. Env is parsed and validated by Zod in `src/config/env.ts` — the process exits on any validation failure with a list of missing/invalid keys.
 

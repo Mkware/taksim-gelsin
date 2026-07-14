@@ -44,7 +44,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_customer_active_ride
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4. Eski güvensiz deduct fonksiyonunu negatif korumalı hale getir
 --    (Backend bunu çağırmıyor; doğrudan/script çağrılarına karşı güvenlik.)
+--    002_add_driver_balance.sql bu fonksiyonu RETURNS VOID olarak tanımlamıştı;
+--    Postgres CREATE OR REPLACE ile dönüş tipi değişikliğine izin vermiyor
+--    ("cannot change return type of existing function") — önce DROP şart.
 -- ─────────────────────────────────────────────────────────────────────────────
+DROP FUNCTION IF EXISTS deduct_driver_balance(UUID, DECIMAL);
 CREATE OR REPLACE FUNCTION deduct_driver_balance(p_driver_id UUID, p_amount DECIMAL)
 RETURNS BOOLEAN AS $$
 DECLARE
