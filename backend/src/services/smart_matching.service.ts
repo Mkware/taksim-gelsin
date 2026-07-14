@@ -848,7 +848,8 @@ async function withMatchingLock(rideId: string, fn: () => Promise<void>): Promis
 
 // ─── Sıradaki Sürücüye Gönder ─────────────────────────────────────────────────
 
-async function sendRequestToNextDriver(
+/** Testler için dışa açık — kuyruktan sıradaki sürücüye teklif gönderme + timeout zincirini doğrudan tetiklemek için. */
+export async function sendRequestToNextDriver(
   rideId    : string,
   customerId: string,
   pickupLat : number,
