@@ -256,3 +256,44 @@ export interface ReviewListResult {
   totalPages: number;
   counts: Record<1 | 2 | 3 | 4 | 5, number>;
 }
+
+// ---- Wallet ledger ----
+export type WalletTransactionType = 'accept_fee' | 'refund' | 'admin_topup' | 'admin_adjust' | 'card_topup';
+
+export interface WalletTransactionItem {
+  id: string;
+  driver_id: string;
+  ride_id: string | null;
+  type: WalletTransactionType;
+  amount: number;
+  balance_after: number | null;
+  reason: string | null;
+  created_at: string;
+  driver: { id: string; vehicle_plate: string; full_name: string; phone: string } | null;
+}
+
+export interface WalletTransactionListResult {
+  items: WalletTransactionItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+// ---- Admin audit log ----
+export interface AdminAuditLogItem {
+  id: string;
+  admin_id: string | null;
+  admin_phone: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AdminAuditLogListResult {
+  items: AdminAuditLogItem[];
+  total: number;
+  page: number;
+  limit: number;
+}

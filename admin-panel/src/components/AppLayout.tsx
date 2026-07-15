@@ -19,6 +19,7 @@ import {
   IconActivity,
   IconCar,
   IconChevronDown,
+  IconClipboardList,
   IconDashboard,
   IconFileText,
   IconLogout,
@@ -28,6 +29,7 @@ import {
   IconStar,
   IconSun,
   IconUsers,
+  IconWallet,
 } from '@tabler/icons-react';
 import { NavLink as RouterNavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -47,6 +49,13 @@ const NAV_GROUPS = [
       { to: '/customers', label: 'Müşteriler', icon: IconUsers },
       { to: '/rides', label: 'Yolculuklar', icon: IconRoute },
       { to: '/reviews', label: 'Değerlendirmeler', icon: IconStar },
+    ],
+  },
+  {
+    label: 'Finans & Denetim',
+    items: [
+      { to: '/wallet', label: 'Cüzdan Hareketleri', icon: IconWallet },
+      { to: '/audit-log', label: 'Denetim Kaydı', icon: IconClipboardList },
     ],
   },
   {

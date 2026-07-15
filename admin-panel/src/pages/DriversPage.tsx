@@ -19,7 +19,8 @@ import {
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconEdit, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconEdit, IconPlus, IconTrash, IconWallet } from '@tabler/icons-react';
+import { useNavigate } from 'react-router-dom';
 import * as adminApi from '../api/admin';
 import { getErrorMessage } from '../api/client';
 import type { DriverItem } from '../types/api';
@@ -46,6 +47,7 @@ const EMPTY_FORM: DriverFormValues = {
 
 export function DriversPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { data: drivers, isLoading } = useQuery({ queryKey: DRIVERS_KEY, queryFn: adminApi.getDrivers });
 
   const [formOpened, { open: openForm, close: closeForm }] = useDisclosure();
@@ -53,6 +55,7 @@ export function DriversPage() {
   const [editing, setEditing] = useState<DriverItem | null>(null);
   const [balanceTarget, setBalanceTarget] = useState<DriverItem | null>(null);
   const [balanceAmount, setBalanceAmount] = useState<number | ''>('');
+  const [balanceReason, setBalanceReason] = useState('');
 
   const form = useForm<DriverFormValues>({ initialValues: EMPTY_FORM });
 
@@ -96,7 +99,8 @@ export function DriversPage() {
   });
 
   const balanceMutation = useMutation({
-    mutationFn: ({ id, amount }: { id: string; amount: number }) => adminApi.addDriverBalance(id, amount),
+    mutationFn: ({ id, amount, reason }: { id: string; amount: number; reason?: string }) =>
+      adminApi.addDriverBalance(id, amount, reason),
     onSuccess: () => {
       notifications.show({ color: 'green', message: 'Bakiye eklendi.' });
       invalidate();
@@ -142,12 +146,17 @@ export function DriversPage() {
   function openBalanceDialog(driver: DriverItem) {
     setBalanceTarget(driver);
     setBalanceAmount('');
+    setBalanceReason('');
     openBalance();
   }
 
   function submitBalance() {
     if (!balanceTarget || balanceAmount === '' || balanceAmount <= 0) return;
-    balanceMutation.mutate({ id: balanceTarget.id, amount: Number(balanceAmount) });
+    balanceMutation.mutate({
+      id: balanceTarget.id,
+      amount: Number(balanceAmount),
+      reason: balanceReason.trim() || undefined,
+    });
   }
 
   return (
@@ -193,6 +202,16 @@ export function DriversPage() {
                     <Tooltip label="Bakiye ekle">
                       <ActionIcon size="sm" variant="light" onClick={() => openBalanceDialog(driver)}>
                         <IconPlus size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                    <Tooltip label="Cüzdan hareketleri">
+                      <ActionIcon
+                        size="sm"
+                        variant="light"
+                        color="gray"
+                        onClick={() => navigate(`/wallet?driverId=${driver.id}`)}
+                      >
+                        <IconWallet size={14} />
                       </ActionIcon>
                     </Tooltip>
                   </Group>
@@ -281,6 +300,12 @@ export function DriversPage() {
             min={1}
             value={balanceAmount}
             onChange={(v) => setBalanceAmount(typeof v === 'number' ? v : '')}
+          />
+          <TextInput
+            label="Not (opsiyonel)"
+            placeholder="Örn. destek talebi #123 için manuel iade"
+            value={balanceReason}
+            onChange={(e) => setBalanceReason(e.currentTarget.value)}
           />
           <Button onClick={submitBalance} loading={balanceMutation.isPending}>
             Ekle

@@ -47,6 +47,8 @@ import {
   listAdminSearchingMatching,
   readMatchingDiagnostics,
 } from '../../services/admin_live_ops.service';
+import { listWalletTransactions } from '../../services/admin_wallet.service';
+import { listAdminAuditLog, recordAdminAction } from '../../services/admin_audit.service';
 
 const router = Router();
 const PRICING_KEY = 'admin:pricing:v1';
@@ -184,7 +186,7 @@ const pricingSchema = z.object({
   minCommission    : z.number().finite().min(0).max(100_000),
 });
 
-router.put('/settings/pricing', async (req: Request, res: Response) => {
+router.put('/settings/pricing', async (req: AdminRequest, res: Response) => {
   try {
     const parsed = pricingSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -194,6 +196,7 @@ router.put('/settings/pricing', async (req: Request, res: Response) => {
     }
     const data = { ...parsed.data, updatedAt: new Date().toISOString() };
     await redis.set(PRICING_KEY, JSON.stringify(data));
+    void recordAdminAction(req.adminUser!, 'settings.pricing_update', 'settings', 'pricing', parsed.data);
     res.json({ success: true, data });
   } catch {
     res.status(500).json({ success: false, error: 'Fiyat ayarları kaydedilemedi.' });
@@ -209,10 +212,11 @@ router.get('/settings/platform', async (_req: Request, res: Response) => {
   }
 });
 
-router.put('/settings/platform', async (req: Request, res: Response) => {
+router.put('/settings/platform', async (req: AdminRequest, res: Response) => {
   try {
     const body = req.body as PlatformSettingsPatch;
     const next = await updatePlatformSettings(body);
+    void recordAdminAction(req.adminUser!, 'settings.platform_update', 'settings', 'platform', body);
     res.json({ success: true, data: next });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Kayıt başarısız.';
@@ -234,7 +238,7 @@ router.get('/drivers', async (_req: Request, res: Response) => {
 });
 
 /** Yeni sürücü — `users` + `drivers` (kayıt akışıyla aynı kurallar) */
-router.post('/drivers', async (req: Request, res: Response) => {
+router.post('/drivers', async (req: AdminRequest, res: Response) => {
   try {
     const parsed = driverRegisterSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -244,6 +248,10 @@ router.post('/drivers', async (req: Request, res: Response) => {
       return;
     }
     const result = await registerDriver(parsed.data);
+    void recordAdminAction(req.adminUser!, 'driver.create', 'driver', result.user.id, {
+      phone: result.user.phone,
+      vehicle_plate: result.driver.vehicle_plate,
+    });
     res.status(201).json({
       success: true,
       data: {
@@ -266,7 +274,7 @@ router.post('/drivers', async (req: Request, res: Response) => {
 });
 
 /** Sürücü profil / araç / telefon / şifre güncelleme */
-router.patch('/drivers/:id', async (req: Request, res: Response) => {
+router.patch('/drivers/:id', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID gerekli.' });
@@ -283,6 +291,9 @@ router.patch('/drivers/:id', async (req: Request, res: Response) => {
 
   try {
     const data = await updateAdminDriver(id, parsed.data);
+    void recordAdminAction(req.adminUser!, 'driver.update', 'driver', id, {
+      fields: Object.keys(parsed.data),
+    });
     res.json({ success: true, data });
   } catch (e) {
     if (e instanceof AppError) {
@@ -295,7 +306,7 @@ router.patch('/drivers/:id', async (req: Request, res: Response) => {
 });
 
 /** Sürücüyü tamamen kaldırır (`users` silinir → `drivers` CASCADE) */
-router.delete('/drivers/:id', async (req: Request, res: Response) => {
+router.delete('/drivers/:id', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID gerekli.' });
@@ -304,6 +315,7 @@ router.delete('/drivers/:id', async (req: Request, res: Response) => {
 
   try {
     const data = await deleteAdminDriver(id);
+    void recordAdminAction(req.adminUser!, 'driver.delete', 'driver', id);
     res.json({ success: true, data });
   } catch (e) {
     if (e instanceof AppError) {
@@ -315,16 +327,19 @@ router.delete('/drivers/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/drivers/:id/balance', async (req: Request, res: Response) => {
+router.post('/drivers/:id/balance', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID zorunludur.' });
     return;
   }
-  const amount = Number((req.body as { amount?: number }).amount ?? 0);
+  const body = req.body as { amount?: number; reason?: string };
+  const amount = Number(body.amount ?? 0);
+  const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) || undefined : undefined;
 
   try {
-    const data = await addAdminDriverBalance(id, amount);
+    const data = await addAdminDriverBalance(id, amount, reason);
+    void recordAdminAction(req.adminUser!, 'driver.balance_add', 'driver', id, { amount, reason });
     res.json({ success: true, data });
   } catch (e) {
     if (e instanceof AppError) {
@@ -335,7 +350,7 @@ router.post('/drivers/:id/balance', async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/drivers/:id/access', async (req: Request, res: Response) => {
+router.patch('/drivers/:id/access', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID gerekli.' });
@@ -349,6 +364,7 @@ router.patch('/drivers/:id/access', async (req: Request, res: Response) => {
 
   try {
     const data = await setAdminDriverAccess(id, rawEnabled);
+    void recordAdminAction(req.adminUser!, 'driver.access_set', 'driver', id, { enabled: rawEnabled });
     res.json({ success: true, data });
   } catch (e) {
     if (e instanceof AppError) {
@@ -415,6 +431,7 @@ router.post('/rides/:id/cancel', async (req: AdminRequest, res: Response) => {
       parsed.data.reason ?? '',
       req.adminUser?.id ?? 'admin',
     );
+    void recordAdminAction(req.adminUser!, 'ride.cancel', 'ride', id, { reason: parsed.data.reason });
     res.json({ success: true, message: 'Yolculuk iptal edildi.', data: ride });
   } catch (e) {
     if (e instanceof AppError) {
@@ -472,7 +489,7 @@ const adminCustomerUpdateSchema = z
   })
   .strict();
 
-router.patch('/customers/:id', async (req: Request, res: Response) => {
+router.patch('/customers/:id', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir müşteri UUID gerekli.' });
@@ -486,6 +503,7 @@ router.patch('/customers/:id', async (req: Request, res: Response) => {
   }
   try {
     const customer = await updateAdminCustomer(id, parsed.data);
+    void recordAdminAction(req.adminUser!, 'customer.update', 'customer', id, parsed.data);
     res.json({ success: true, data: customer });
   } catch (e) {
     if (e instanceof AppError) {
@@ -496,7 +514,7 @@ router.patch('/customers/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/customers/:id/revoke-sessions', async (req: Request, res: Response) => {
+router.post('/customers/:id/revoke-sessions', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir müşteri UUID gerekli.' });
@@ -504,6 +522,7 @@ router.post('/customers/:id/revoke-sessions', async (req: Request, res: Response
   }
   try {
     await revokeCustomerSessions(id);
+    void recordAdminAction(req.adminUser!, 'customer.revoke_sessions', 'customer', id);
     res.json({ success: true, message: 'Tüm oturumlar sonlandırıldı.' });
   } catch (e) {
     if (e instanceof AppError) {
@@ -518,7 +537,7 @@ const adminCustomerPasswordSchema = z.object({
   password: z.string().min(6).max(128),
 });
 
-router.post('/customers/:id/reset-password', async (req: Request, res: Response) => {
+router.post('/customers/:id/reset-password', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir müşteri UUID gerekli.' });
@@ -531,6 +550,7 @@ router.post('/customers/:id/reset-password', async (req: Request, res: Response)
   }
   try {
     await resetCustomerPassword(id, parsed.data.password);
+    void recordAdminAction(req.adminUser!, 'customer.reset_password', 'customer', id);
     res.json({ success: true, message: 'Şifre güncellendi ve oturumlar kapatıldı.' });
   } catch (e) {
     if (e instanceof AppError) {
@@ -541,7 +561,7 @@ router.post('/customers/:id/reset-password', async (req: Request, res: Response)
   }
 });
 
-router.delete('/customers/:id', async (req: Request, res: Response) => {
+router.delete('/customers/:id', async (req: AdminRequest, res: Response) => {
   const id = req.params.id;
   if (!isValidUUID(id)) {
     res.status(400).json({ success: false, error: 'Geçerli bir müşteri UUID gerekli.' });
@@ -549,6 +569,7 @@ router.delete('/customers/:id', async (req: Request, res: Response) => {
   }
   try {
     await deleteAdminCustomer(id);
+    void recordAdminAction(req.adminUser!, 'customer.delete', 'customer', id);
     res.json({ success: true, data: { id } });
   } catch (e) {
     if (e instanceof AppError) {
@@ -612,7 +633,7 @@ router.get('/ops/matching/:rideId', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/ops/matching/:rideId/clear', async (req: Request, res: Response) => {
+router.post('/ops/matching/:rideId/clear', async (req: AdminRequest, res: Response) => {
   const rideId = req.params.rideId;
   if (!isValidUUID(rideId)) {
     res.status(400).json({ success: false, error: 'Geçerli yolculuk UUID gerekli.' });
@@ -620,6 +641,7 @@ router.post('/ops/matching/:rideId/clear', async (req: Request, res: Response) =
   }
   try {
     await adminClearRideMatching(rideId);
+    void recordAdminAction(req.adminUser!, 'ops.matching_clear', 'ride', rideId);
     res.json({ success: true, message: 'Eşleştirme kuyruğu temizlendi.' });
   } catch (e) {
     if (e instanceof AppError) {
@@ -630,9 +652,12 @@ router.post('/ops/matching/:rideId/clear', async (req: Request, res: Response) =
   }
 });
 
-router.post('/ops/stale-searching/recover', async (_req: Request, res: Response) => {
+router.post('/ops/stale-searching/recover', async (req: AdminRequest, res: Response) => {
   try {
     const data = await adminRecoverStaleSearching();
+    void recordAdminAction(req.adminUser!, 'ops.stale_searching_recover', 'ops', null, {
+      recovered: data.recovered,
+    });
     res.json({
       success: true,
       message: `${data.recovered} yolculuk kurtarıldı/iptal edildi.`,
@@ -755,6 +780,12 @@ router.post('/push/broadcast', broadcastPushLimiter, async (req: AdminRequest, r
     logger.info(
       `[Admin] Push yayın: audience=${audience} admin=${adminId} token=${result.totalTokens} başarı=${result.successCount}`,
     );
+    void recordAdminAction(req.adminUser!, 'push.broadcast', 'push', null, {
+      audience,
+      title,
+      totalTokens: result.totalTokens,
+      successCount: result.successCount,
+    });
     res.json({ success: true, data: result });
   } catch (error) {
     if (error instanceof Error) {
@@ -772,6 +803,50 @@ router.post('/push/broadcast', broadcastPushLimiter, async (req: AdminRequest, r
     }
     logger.error('Admin push/broadcast:', error);
     res.status(500).json({ success: false, error: 'Toplu bildirim gönderilemedi.' });
+  }
+});
+
+/** Sürücü cüzdanı (T-Coin) hareket defteri — filtre: driverId, type, page, limit. */
+router.get('/wallet/transactions', async (req: Request, res: Response) => {
+  try {
+    const driverId = typeof req.query.driverId === 'string' ? req.query.driverId : undefined;
+    if (driverId && !isValidUUID(driverId)) {
+      res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID gerekli.' });
+      return;
+    }
+    const data = await listWalletTransactions({
+      page: Number(req.query.page ?? 1),
+      limit: Number(req.query.limit ?? 50),
+      driverId,
+      type: typeof req.query.type === 'string' ? req.query.type : undefined,
+    });
+    res.json({ success: true, data });
+  } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Cüzdan hareketleri alınamadı.' });
+  }
+});
+
+/** Admin panelinden yapılan eylemlerin denetim kaydı — filtre: action, targetType, adminPhone, page, limit. */
+router.get('/audit-log', async (req: Request, res: Response) => {
+  try {
+    const data = await listAdminAuditLog({
+      page: Number(req.query.page ?? 1),
+      limit: Number(req.query.limit ?? 50),
+      action: typeof req.query.action === 'string' ? req.query.action : undefined,
+      targetType: typeof req.query.targetType === 'string' ? req.query.targetType : undefined,
+      adminPhone: typeof req.query.adminPhone === 'string' ? req.query.adminPhone : undefined,
+    });
+    res.json({ success: true, data });
+  } catch (e) {
+    if (e instanceof AppError) {
+      res.status(e.statusCode).json({ success: false, error: e.message });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Denetim kaydı alınamadı.' });
   }
 });
 

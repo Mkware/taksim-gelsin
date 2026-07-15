@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import type {
+  AdminAuditLogListResult,
   ApiSuccess,
   BroadcastResult,
   CustomerItem,
@@ -14,6 +15,7 @@ import type {
   RideItem,
   RideStatus,
   SearchingMatchingItem,
+  WalletTransactionListResult,
 } from '../types/api';
 
 // ---- Overview ----
@@ -58,9 +60,14 @@ export async function deleteDriver(id: string): Promise<void> {
   await apiClient.delete(`/admin/drivers/${id}`);
 }
 
-export async function addDriverBalance(id: string, amount: number): Promise<{ id: string; balance: number }> {
+export async function addDriverBalance(
+  id: string,
+  amount: number,
+  reason?: string,
+): Promise<{ id: string; balance: number }> {
   const res = await apiClient.post<ApiSuccess<{ id: string; balance: number }>>(`/admin/drivers/${id}/balance`, {
     amount,
+    reason,
   });
   return res.data.data;
 }
@@ -198,5 +205,36 @@ export interface ListReviewsParams {
 
 export async function getReviews(params: ListReviewsParams = {}): Promise<ReviewListResult> {
   const res = await apiClient.get<ApiSuccess<ReviewListResult>>('/admin/reviews', { params });
+  return res.data.data;
+}
+
+// ---- Wallet ledger ----
+export interface ListWalletTransactionsParams {
+  driverId?: string;
+  type?: string;
+  page?: number;
+  limit?: number;
+}
+
+export async function getWalletTransactions(
+  params: ListWalletTransactionsParams = {},
+): Promise<WalletTransactionListResult> {
+  const res = await apiClient.get<ApiSuccess<WalletTransactionListResult>>('/admin/wallet/transactions', {
+    params,
+  });
+  return res.data.data;
+}
+
+// ---- Admin audit log ----
+export interface ListAuditLogParams {
+  action?: string;
+  targetType?: string;
+  adminPhone?: string;
+  page?: number;
+  limit?: number;
+}
+
+export async function getAuditLog(params: ListAuditLogParams = {}): Promise<AdminAuditLogListResult> {
+  const res = await apiClient.get<ApiSuccess<AdminAuditLogListResult>>('/admin/audit-log', { params });
   return res.data.data;
 }

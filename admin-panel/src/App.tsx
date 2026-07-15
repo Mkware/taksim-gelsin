@@ -10,6 +10,8 @@ import { LiveOpsPage } from './pages/LiveOpsPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ReviewsPage } from './pages/ReviewsPage';
+import { WalletLedgerPage } from './pages/WalletLedgerPage';
+import { AuditLogPage } from './pages/AuditLogPage';
 
 function App() {
   return (
@@ -24,6 +26,8 @@ function App() {
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/rides" element={<RidesPage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
+          <Route path="/wallet" element={<WalletLedgerPage />} />
+          <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/logs" element={<LogsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
