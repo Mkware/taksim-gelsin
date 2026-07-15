@@ -117,12 +117,12 @@ export async function recoverOrphanSearchingRidesOnce(): Promise<number> {
     const rideId = row.id as string;
     const customerId = row.customer_id as string;
     try {
-      // Redis'te canlı eşleştirme state'i var mı? (pending teklif veya dolu kuyruk)
-      const [pending, queueLen] = await Promise.all([
-        redis.get(`ride:pending:${rideId}`),
+      // Redis'te canlı eşleştirme state'i var mı? (pending teklif [SET] veya dolu kuyruk)
+      const [pendingExists, queueLen] = await Promise.all([
+        redis.exists(`ride:pending:${rideId}`),
         redis.llen(`ride:matching:${rideId}`),
       ]);
-      if (pending || (Number(queueLen) || 0) > 0) {
+      if (pendingExists > 0 || (Number(queueLen) || 0) > 0) {
         continue; // eşleştirme canlı — dokunma
       }
 

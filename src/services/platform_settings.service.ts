@@ -31,6 +31,11 @@ function envDefaults(): PlatformOperationalSettings {
       5,
       180,
     ),
+    matchingOfferWaveSize: clamp(
+      Math.floor(Number(process.env.MATCHING_OFFER_WAVE_SIZE ?? 1)),
+      1,
+      3,
+    ),
     walletCardSimulationEnabled: env.WALLET_CARD_SIMULATION_ENABLED,
     tariffBaseFare: Number(process.env.TARIFF_BASE_FARE ?? 50),
     tariffPerKmRate: Number(process.env.TARIFF_PER_KM_RATE ?? 50),
@@ -49,6 +54,8 @@ export type PlatformSettingsPatch = Partial<{
   drivingDistanceCacheTtlSec: number;
   /** Sürücünün gelen çağrıya yanıt penceresi (sn) — eşleştirme timeout ile aynı. */
   driverResponseTimeoutSeconds: number;
+  /** Aynı anda kaç sürücüye teklif gönderilir (paralel dalga). 1 = sıralı (klasik) davranış. */
+  matchingOfferWaveSize: number;
   walletCardSimulationEnabled: boolean;
   /** Açılış ücreti (TL) — bkz. modules/ride/pricing.service.ts */
   tariffBaseFare: number;
@@ -67,6 +74,7 @@ export interface PlatformOperationalSettings {
   matchingRoadMatrixMaxDrivers: number;
   drivingDistanceCacheTtlSec: number;
   driverResponseTimeoutSeconds: number;
+  matchingOfferWaveSize: number;
   walletCardSimulationEnabled: boolean;
   tariffBaseFare: number;
   tariffPerKmRate: number;
@@ -105,6 +113,11 @@ function mergeFromDbRow(raw: Record<string, unknown> | null | undefined): Platfo
       Math.floor(num(raw.driverResponseTimeoutSeconds, d.driverResponseTimeoutSeconds)),
       5,
       180,
+    ),
+    matchingOfferWaveSize: clamp(
+      Math.floor(num(raw.matchingOfferWaveSize, d.matchingOfferWaveSize)),
+      1,
+      3,
     ),
     walletCardSimulationEnabled: bool(raw.walletCardSimulationEnabled, d.walletCardSimulationEnabled),
     tariffBaseFare: clamp(num(raw.tariffBaseFare, d.tariffBaseFare), 0, 10_000),
@@ -201,6 +214,11 @@ export async function updatePlatformSettings(
       5,
       180,
     ),
+    matchingOfferWaveSize: clamp(
+      Math.floor(Number(patch.matchingOfferWaveSize ?? base.matchingOfferWaveSize)),
+      1,
+      3,
+    ),
     walletCardSimulationEnabled:
       patch.walletCardSimulationEnabled ?? base.walletCardSimulationEnabled,
     tariffBaseFare: clamp(Number(patch.tariffBaseFare ?? base.tariffBaseFare), 0, 10_000),
@@ -220,6 +238,7 @@ export async function updatePlatformSettings(
     matchingRoadMatrixMaxDrivers: next.matchingRoadMatrixMaxDrivers,
     drivingDistanceCacheTtlSec: next.drivingDistanceCacheTtlSec,
     driverResponseTimeoutSeconds: next.driverResponseTimeoutSeconds,
+    matchingOfferWaveSize: next.matchingOfferWaveSize,
     walletCardSimulationEnabled: next.walletCardSimulationEnabled,
     tariffBaseFare: next.tariffBaseFare,
     tariffPerKmRate: next.tariffPerKmRate,

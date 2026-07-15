@@ -140,4 +140,129 @@ describe('eşleştirme akışı: teklif → yanıtsızlık → sıradaki sürüc
     driver1Socket.disconnect();
     driver2Socket.disconnect();
   }, 20_000);
+
+  it('paralel dalga (2): teklif iki sürücüye AYNI ANDA gider; ilk kabul eden kazanır, diğerine accepted_by_other iptali gider', async () => {
+    const settings = await import('../../src/services/platform_settings.service');
+    // Dalga boyutunu 2'ye çek (platform_settings tablosu migration'larla mevcut) —
+    // test sonunda 1'e geri alınır ki dosyadaki diğer testler sıralı davranışta kalsın.
+    await settings.updatePlatformSettings({ matchingOfferWaveSize: 2 });
+
+    const customerId = await insertCustomer(stack.pool);
+    const driver1Id = await insertDriver(stack.pool, { balance: 50 });
+    const driver2Id = await insertDriver(stack.pool, { balance: 50 });
+    const rideId = await insertSearchingRide(stack.pool, customerId, { estimatedPrice: 120 });
+
+    const driver1Socket = await connectDriverSocket(driver1Id);
+    const driver2Socket = await connectDriverSocket(driver2Id);
+
+    try {
+      await Promise.all([
+        goOnlineAndWaitConfirmed(driver1Socket),
+        goOnlineAndWaitConfirmed(driver2Socket),
+      ]);
+
+      await redis.rpush(REDIS_KEYS.matchingQueue(rideId), driver1Id, driver2Id);
+
+      const offer1 = new Promise<{ rideId: string; targetDriverId: string }>((resolve) => {
+        driver1Socket.once('ride:new_request', resolve);
+      });
+      const offer2 = new Promise<{ rideId: string; targetDriverId: string }>((resolve) => {
+        driver2Socket.once('ride:new_request', resolve);
+      });
+
+      await sendRequestToNextDriver(rideId, customerId, 39.8468, 33.515);
+
+      // İKİ teklif de tek doldurma turunda gelmeli — timeout beklenmeden (sıralı akışta
+      // ikinci teklif ancak ~5sn sonra gelirdi; burada ikisi de anında).
+      const [firstOffer, secondOffer] = await Promise.all([offer1, offer2]);
+      expect(firstOffer.rideId).toBe(rideId);
+      expect(secondOffer.rideId).toBe(rideId);
+
+      // driver2'nin teklifi, driver1 kabul edince accepted_by_other ile kapanmalı.
+      const cancelledOnDriver2 = new Promise<{ rideId: string; reason: string }>((resolve) => {
+        driver2Socket.once('ride:request_cancelled', resolve);
+      });
+      const revealOnDriver1 = new Promise<{ rideId: string }>((resolve) => {
+        driver1Socket.once('ride:reveal_location', resolve);
+      });
+
+      driver1Socket.emit('ride:accept', { rideId });
+
+      const cancelMsg = await cancelledOnDriver2;
+      expect(cancelMsg.rideId).toBe(rideId);
+      expect(cancelMsg.reason).toBe('accepted_by_other');
+
+      await revealOnDriver1; // kabul akışı sürücü tarafında tamamlandı
+
+      // DB'de kazanan driver1; atomik accept_ride_with_fee tek kabul garantiler.
+      const { rows } = await stack.pool.query(
+        'SELECT status, driver_id FROM rides WHERE id = $1',
+        [rideId],
+      );
+      expect(rows[0].status).toBe('accepted');
+      expect(rows[0].driver_id).toBe(driver1Id);
+
+      // Kaybeden sürücünün teklif kilidi temizlendi — yeni çağrı alabilir.
+      const driver2Lock = await redis.get(`driver:pending_offer:${driver2Id}`);
+      expect(driver2Lock).toBeNull();
+    } finally {
+      driver1Socket.disconnect();
+      driver2Socket.disconnect();
+      await settings.updatePlatformSettings({ matchingOfferWaveSize: 1 });
+    }
+  }, 30_000);
+
+  it('paralel dalga (2): bir sürücü reddedince dalga kuyruktaki sıradaki sürücüyle ANINDA doldurulur', async () => {
+    const settings = await import('../../src/services/platform_settings.service');
+    await settings.updatePlatformSettings({ matchingOfferWaveSize: 2 });
+
+    const customerId = await insertCustomer(stack.pool);
+    const driver1Id = await insertDriver(stack.pool, { balance: 50 });
+    const driver2Id = await insertDriver(stack.pool, { balance: 50 });
+    const driver3Id = await insertDriver(stack.pool, { balance: 50 });
+    const rideId = await insertSearchingRide(stack.pool, customerId, { estimatedPrice: 120 });
+
+    const driver1Socket = await connectDriverSocket(driver1Id);
+    const driver2Socket = await connectDriverSocket(driver2Id);
+    const driver3Socket = await connectDriverSocket(driver3Id);
+
+    try {
+      await Promise.all([
+        goOnlineAndWaitConfirmed(driver1Socket),
+        goOnlineAndWaitConfirmed(driver2Socket),
+        goOnlineAndWaitConfirmed(driver3Socket),
+      ]);
+
+      await redis.rpush(REDIS_KEYS.matchingQueue(rideId), driver1Id, driver2Id, driver3Id);
+
+      const offer1 = new Promise<{ rideId: string }>((resolve) => {
+        driver1Socket.once('ride:new_request', resolve);
+      });
+      const offer2 = new Promise<{ rideId: string }>((resolve) => {
+        driver2Socket.once('ride:new_request', resolve);
+      });
+      const offer3 = new Promise<{ rideId: string; targetDriverId: string }>((resolve) => {
+        driver3Socket.once('ride:new_request', resolve);
+      });
+
+      await sendRequestToNextDriver(rideId, customerId, 39.8468, 33.515);
+      await Promise.all([offer1, offer2]); // dalga: driver1 + driver2
+
+      // driver1 reddeder → boşalan slot timeout BEKLENMEDEN driver3 ile dolmalı.
+      driver1Socket.emit('ride:reject', { rideId });
+
+      const thirdOffer = await offer3;
+      expect(thirdOffer.rideId).toBe(rideId);
+      expect(thirdOffer.targetDriverId).toBe(driver3Id);
+
+      // driver2'nin teklifi hâlâ açık (ret dalganın kalanını etkilemez).
+      const driver2Lock = await redis.get(`driver:pending_offer:${driver2Id}`);
+      expect(driver2Lock).toBe(rideId);
+    } finally {
+      driver1Socket.disconnect();
+      driver2Socket.disconnect();
+      driver3Socket.disconnect();
+      await settings.updatePlatformSettings({ matchingOfferWaveSize: 1 });
+    }
+  }, 30_000);
 });
