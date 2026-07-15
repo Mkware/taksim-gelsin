@@ -31,6 +31,7 @@ import {
   isDriverPendingOfferFor,
 } from '../../services/smart_matching.service';
 import { sendCustomerDriverArrivedPush, notifyRideCancelledByFcm } from '../../services/push_notification.service';
+import { clearMessages } from '../../services/ride_chat.service';
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -490,6 +491,8 @@ export function registerRideHandlers(socket: TypedSocket, io: TypedSocketServer)
           await redis.del(`driver:active_ride:${ride.driver_id}`);
         }
 
+        await clearMessages(rideId);
+
         logger.info(`🏁 Yolculuk tamamlandı: ${rideId}, Ücret: ${finalPrice} TL`);
       } catch (error) {
         logger.error(`ride:complete hatası [${userId}]:`, error);
@@ -615,6 +618,8 @@ export function registerRideHandlers(socket: TypedSocket, io: TypedSocketServer)
       if (cancelledRide?.driver_id) {
         await redis.del(`driver:active_ride:${cancelledRide.driver_id}`);
       }
+
+      await clearMessages(targetRideId);
 
       if (shouldNotifyFcm && cancelledRide?.customer_id) {
         void notifyRideCancelledByFcm({

@@ -23,6 +23,7 @@ import { socketAuthMiddleware } from './middleware/socket.auth';
 import { registerDriverHandlers } from './handlers/driver.handler';
 import { registerRideHandlers } from './handlers/ride.handler';
 import { registerTrackingHandlers } from './handlers/tracking.handler';
+import { registerMessageHandlers } from './handlers/message.handler';
 
 // Tip güvenli Socket.io sunucusu
 export type TypedSocketServer = Server<
@@ -117,6 +118,9 @@ export function initSocketManager(httpServer: HttpServer): TypedSocketServer {
     // Canlı takip: bağlantı kurulduğunda aktif yolculuk kontrolü
     registerTrackingHandlers(socket, io);
 
+    // Sohbet: aktif yolculuk boyunca müşteri ↔ sürücü mesajlaşma
+    registerMessageHandlers(socket, io);
+
     // ============================================================
     // BAĞLANTI KOPMA
     // ============================================================
@@ -133,7 +137,7 @@ export function initSocketManager(httpServer: HttpServer): TypedSocketServer {
     });
   });
 
-  logger.info('✅ Socket.io yöneticisi başlatıldı (JWT auth + 3 handler)');
+  logger.info('✅ Socket.io yöneticisi başlatıldı (JWT auth + 4 handler)');
   return io;
 }
 
