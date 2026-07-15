@@ -109,7 +109,10 @@ export interface MatchingDiagnostics {
   queueRemaining: number;
   queueDriverIds: string[];
   rejectedDriverIds: string[];
+  /** Geriye dönük — dalgadaki ilk sürücü (varsa). */
   pendingDriverId: string | null;
+  /** Paralel teklif dalgasındaki tüm açık teklif sahipleri. */
+  pendingDriverIds?: string[];
   offerSecondsLeft: number | null;
   hasMatchingQueue: boolean;
 }
@@ -190,6 +193,8 @@ export interface PlatformSettings {
   matchingRoadMatrixMaxDrivers: number;
   drivingDistanceCacheTtlSec: number;
   driverResponseTimeoutSeconds: number;
+  /** Aynı anda kaç sürücüye teklif gönderilir (1 = sıralı klasik davranış). */
+  matchingOfferWaveSize: number;
   walletCardSimulationEnabled: boolean;
   /** Açılış ücreti (TL) */
   tariffBaseFare: number;

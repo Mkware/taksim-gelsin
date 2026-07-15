@@ -104,7 +104,11 @@ export function LiveOpsPage() {
                 <Badge variant="light">Reddeden: {item.matching.rejectedDriverIds.length}</Badge>
                 {item.matching.pendingDriverId && (
                   <Badge color="blue" variant="light">
-                    Yanıt bekleniyor ({item.matching.offerSecondsLeft ?? '?'}sn)
+                    Yanıt bekleniyor
+                    {(item.matching.pendingDriverIds?.length ?? 1) > 1
+                      ? ` — ${item.matching.pendingDriverIds!.length} sürücü`
+                      : ''}{' '}
+                    ({item.matching.offerSecondsLeft ?? '?'}sn)
                   </Badge>
                 )}
                 <Button

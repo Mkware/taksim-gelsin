@@ -28,6 +28,7 @@ import {
   handleSmartRejection,
   handleSmartAcceptance,
   clearSmartMatchingQueue,
+  isDriverPendingOfferFor,
 } from '../../services/smart_matching.service';
 import { sendCustomerDriverArrivedPush, notifyRideCancelledByFcm } from '../../services/push_notification.service';
 import type {
@@ -131,35 +132,23 @@ export function registerRideHandlers(socket: TypedSocket, io: TypedSocketServer)
         const { rideId } = payload;
         if (!rideId) return;
 
-        // Eşleştirme süresinin dolup dolmadığını (veya başkasına geçip geçmediğini) kontrol et.
+        // Bu sürücünün teklifi hâlâ geçerli mi? (dalgada birden çok sürücü olabilir —
+        // `ride:pending` artık SET, üyelik kontrolü yapılır.)
         // Not: Bu kontrol sadece "erken çıkış" amaçlıdır — gerçek atomik kazanan,
-        // updateRideStatus içindeki searching→accepted koşullu update'tir.
-        const pendingDriver = await redis.get(`ride:pending:${rideId}`);
-        if (pendingDriver && pendingDriver !== userId) {
+        // accept_ride_with_fee içindeki searching→accepted koşullu update'tir; dalgadaki
+        // eşzamanlı kabullerde kaybeden oradan kesintisiz RIDE_UNAVAILABLE alır.
+        const offerStillValid = await isDriverPendingOfferFor(rideId, userId);
+        if (!offerStillValid) {
           socket.emit('ride:accept_failed', {
             rideId,
             reason: 'TIMEOUT',
-            message: 'Süre doldu veya çağrı başka sürücüye geçti.',
+            message: 'Süre doldu veya çağrı artık geçerli değil.',
           });
           // İstemci tarafında modal'ı kapatmak için cancel da gönder
           socket.emit('ride:request_cancelled', {
             rideId,
             reason: 'timeout',
-            message: 'Süre doldu veya çağrı başka sürücüye geçti.',
-          });
-          return;
-        }
-        // Timeout / eşleştirme pending'i sildiyse teklif yok — cüzdan kesmeden çık
-        if (!pendingDriver) {
-          socket.emit('ride:accept_failed', {
-            rideId,
-            reason: 'TIMEOUT',
-            message: 'Çağrı süresi doldu veya teklif artık geçerli değil.',
-          });
-          socket.emit('ride:request_cancelled', {
-            rideId,
-            reason: 'timeout',
-            message: 'Çağrı süresi doldu veya teklif artık geçerli değil.',
+            message: 'Süre doldu veya çağrı artık geçerli değil.',
           });
           return;
         }
@@ -203,10 +192,10 @@ export function registerRideHandlers(socket: TypedSocket, io: TypedSocketServer)
         }
         const ride = acceptResult.ride;
 
-        // Timeout / sıra: Redis’teki bekleyeni kapat. Bildirim GÖNDERME — pending
-        // hâlâ kabul eden sürücü; `true` olsa "başka sürücü kabul etti" yanlış gider.
+        // Timeout / sıra: Redis'teki bekleyenleri kapat. Dalgadaki DİĞER sürücülere
+        // "başka sürücü kabul etti" anında gitsin; kazanan (userId) hariç tutulur.
         try {
-          await clearSmartMatchingQueue(rideId, false, 'accepted_by_other');
+          await clearSmartMatchingQueue(rideId, true, 'accepted_by_other', userId);
         } catch (clearEarlyErr) {
           logger.warn(`ride:accept erken eşleştirme temizliği [${rideId}]:`, clearEarlyErr);
         }
@@ -328,7 +317,9 @@ export function registerRideHandlers(socket: TypedSocket, io: TypedSocketServer)
         } finally {
           try { socket.join(`ride:${rideId}`); } catch { /* */ }
           try { await redis.set(`driver:active_ride:${userId}`, rideId, 'EX', 86400); } catch { /* */ }
-          try { await clearSmartMatchingQueue(rideId, false); } catch (clearErr) {
+          // İkinci temizlik turu: erken temizlik ile bu satır arasında (yarışta) dalgaya
+          // eklenmiş bir teklif kaldıysa onu da kapat ve sürücüsüne iptal bildir.
+          try { await clearSmartMatchingQueue(rideId, true, 'accepted_by_other', userId); } catch (clearErr) {
             logger.warn(`ride:accept clearSmartMatchingQueue [${rideId}]:`, clearErr);
           }
         }

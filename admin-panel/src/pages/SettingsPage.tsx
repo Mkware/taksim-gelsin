@@ -104,6 +104,14 @@ function PlatformSettingsSection() {
           value={form.driverResponseTimeoutSeconds}
           onChange={(v) => setForm({ ...form, driverResponseTimeoutSeconds: Number(v) || 0 })}
         />
+        <NumberInput
+          label="Paralel teklif dalgası (sürücü sayısı)"
+          description="Aynı anda kaç sürücüye çağrı gönderilir; ilk kabul eden kazanır. 1 = sıralı."
+          min={1}
+          max={3}
+          value={form.matchingOfferWaveSize ?? 1}
+          onChange={(v) => setForm({ ...form, matchingOfferWaveSize: Number(v) || 1 })}
+        />
       </SimpleGrid>
       <Title order={5} mt="lg" mb="xs">
         Taksi Tarifesi

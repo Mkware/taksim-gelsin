@@ -8,7 +8,7 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/error.middleware';
 import { decodeEwkbPoint } from '../utils/geo';
-import { clearSmartMatchingQueue } from './smart_matching.service';
+import { clearSmartMatchingQueue, getPendingOfferDrivers } from './smart_matching.service';
 import { recoverStaleSearchingRidesOnce } from './stale_searching_recovery.service';
 import { redisDriverResponseDeadlineKey } from './matching_timeouts';
 import { getPlatformSettings } from './platform_settings.service';
@@ -32,30 +32,37 @@ export interface MatchingDiagnostics {
   queueRemaining: number;
   queueDriverIds: string[];
   rejectedDriverIds: string[];
+  /** Geriye dönük alan — dalgadaki ilk sürücü (varsa). */
   pendingDriverId: string | null;
+  /** Dalgadaki tüm açık teklif sahipleri. */
+  pendingDriverIds: string[];
   offerSecondsLeft: number | null;
   hasMatchingQueue: boolean;
 }
 
 export async function readMatchingDiagnostics(rideId: string): Promise<MatchingDiagnostics> {
   const timeoutSec = getPlatformSettings().driverResponseTimeoutSeconds;
-  const [queuedTotalRaw, askedRaw, queueLen, queueIds, rejected, pending, deadlineRaw] =
+  const [queuedTotalRaw, askedRaw, queueLen, queueIds, rejected, pendingIds] =
     await Promise.all([
       redis.get(MATCHING_KEYS.queuedTotal(rideId)),
       redis.get(MATCHING_KEYS.asked(rideId)),
       redis.llen(MATCHING_KEYS.queue(rideId)),
       redis.lrange(MATCHING_KEYS.queue(rideId), 0, -1),
       redis.smembers(MATCHING_KEYS.rejected(rideId)),
-      redis.get(MATCHING_KEYS.pending(rideId)),
-      redis.get(redisDriverResponseDeadlineKey(rideId)),
+      getPendingOfferDrivers(rideId),
     ]);
 
+  // Dalgadaki en geç biten teklifin kalan süresi.
   let offerSecondsLeft: number | null = null;
-  if (pending) {
-    const deadline = deadlineRaw != null ? Number(deadlineRaw) : NaN;
-    offerSecondsLeft = Number.isFinite(deadline)
-      ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
-      : timeoutSec;
+  if (pendingIds.length > 0) {
+    const deadlineRaws = await Promise.all(
+      pendingIds.map((d) => redis.get(redisDriverResponseDeadlineKey(rideId, d))),
+    );
+    const deadlines = deadlineRaws.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+    offerSecondsLeft =
+      deadlines.length > 0
+        ? Math.max(0, Math.ceil((Math.max(...deadlines) - Date.now()) / 1000))
+        : timeoutSec;
   }
 
   const queueRemaining = Math.max(0, Number(queueLen) || 0);
@@ -66,11 +73,12 @@ export async function readMatchingDiagnostics(rideId: string): Promise<MatchingD
     queueRemaining,
     queueDriverIds: queueIds ?? [],
     rejectedDriverIds: rejected ?? [],
-    pendingDriverId: pending,
+    pendingDriverId: pendingIds[0] ?? null,
+    pendingDriverIds: pendingIds,
     offerSecondsLeft,
     hasMatchingQueue:
       queueRemaining > 0 ||
-      Boolean(pending) ||
+      pendingIds.length > 0 ||
       (rejected?.length ?? 0) > 0 ||
       Number(queuedTotalRaw) > 0,
   };

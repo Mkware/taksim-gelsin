@@ -194,7 +194,7 @@ async function sendRideRequestByRideId(driverId: string, rideId: string): Promis
 
   let responseDeadlineMs = Date.now() + getDriverResponseTimeoutMs();
   try {
-    const raw = await redis.get(redisDriverResponseDeadlineKey(rideId));
+    const raw = await redis.get(redisDriverResponseDeadlineKey(rideId, driverId));
     const parsed = raw != null ? Number(raw) : NaN;
     if (Number.isFinite(parsed)) {
       responseDeadlineMs = parsed;
