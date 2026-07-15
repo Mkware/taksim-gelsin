@@ -183,10 +183,30 @@ export async function deleteAdminDriver(driverId: string): Promise<{ id: string 
   return { id: driverId };
 }
 
+/** Admin bakiye ekleme sonucunda `wallet_transactions`'a iz bırakır (yoksa panel üzerinden yapılan hiçbir ekleme izlenemez). */
+async function recordAdminTopupLedgerEntry(
+  driverId: string,
+  amount: number,
+  balanceAfter: number,
+  reason?: string,
+): Promise<void> {
+  const { error } = await supabaseAdmin.from('wallet_transactions').insert({
+    driver_id: driverId,
+    type: 'admin_topup',
+    amount,
+    balance_after: balanceAfter,
+    reason: reason ?? null,
+  });
+  if (error) {
+    logger.error('[AdminBalance] wallet_transactions kaydı eklenemedi:', error);
+  }
+}
+
 /** T Coin ekler (`add_driver_balance` RPC; RPC eksikse read+write fallback). */
 export async function addAdminDriverBalance(
   driverId: string,
   amount: number,
+  reason?: string,
 ): Promise<{ id: string; balance: number }> {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new AppError('Geçerli bir bakiye tutarı girin.', 400);
@@ -226,6 +246,7 @@ export async function addAdminDriverBalance(
       throw new AppError(`Sürücü bakiyesi güncellenemedi (fallback): ${updErr?.message ?? 'bilinmeyen hata'}`, 500);
     }
 
+    await recordAdminTopupLedgerEntry(driverId, amount, Number(updated.balance ?? 0), reason);
     return { id: updated.id as string, balance: Number(updated.balance ?? 0) };
   }
 
@@ -239,6 +260,7 @@ export async function addAdminDriverBalance(
     throw new AppError('Sürücü bulunamadı.', 404);
   }
 
+  await recordAdminTopupLedgerEntry(driverId, amount, Number(driver.balance ?? 0), reason);
   return { id: driver.id as string, balance: Number(driver.balance ?? 0) };
 }
 
