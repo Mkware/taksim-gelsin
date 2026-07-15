@@ -1,6 +1,6 @@
 /**
- * Sürücü → biniş yol mesafesi: Google Distance Matrix (driving) + Redis önbellek.
- * Anahtar yok / API hata: Haversine (metre).
+ * Sürücü → biniş yol mesafesi + süresi: Google Distance Matrix (driving) + Redis önbellek.
+ * Anahtar yok / API hata: Haversine mesafe + sabit hız varsayımıyla tahmini süre.
  */
 
 import * as https from 'https';
@@ -8,17 +8,23 @@ import { getPlatformSettings } from './platform_settings.service';
 import { env } from '../config/env';
 import { redis } from '../config/redis';
 import { logger } from '../utils/logger';
-import { calculateDistanceMeters, Coordinates } from '../utils/distance';
+import { calculateDistanceMeters, estimateArrivalTime, Coordinates } from '../utils/distance';
 
 const MAX_MATRIX_ORIGINS_PER_REQUEST = 25;
 /** Google yanıt vermezse istek sonsuza asılmasın — timeout'ta Haversine fallback'e düşülür. */
 const MATRIX_HTTP_TIMEOUT_MS = 4000;
 
-const CACHE_KEY_PREFIX = 'gdm:v1';
+const CACHE_KEY_PREFIX = 'gdm:v2'; // v2: değer artık "metre:saniye" (önceki v1 sadece metreydi)
+
+export interface DrivingResult {
+  meters: number;
+  seconds: number;
+}
 
 interface DMElement {
   status: string;
   distance?: { value: number; text: string };
+  duration?: { value: number; text: string };
 }
 
 interface DMRow {
@@ -33,6 +39,15 @@ interface DMResponse {
 
 function haversineMeters(from: Coordinates, to: Coordinates): number {
   return calculateDistanceMeters(from, to);
+}
+
+/** Matrix/Redis'ten süre alınamadığında: sabit 30km/h varsayımıyla tahmini süre (sn). */
+function estimatedSecondsFallback(from: Coordinates, to: Coordinates): number {
+  return estimateArrivalTime(from, to) * 60;
+}
+
+function haversineFallback(from: Coordinates, to: Coordinates): DrivingResult {
+  return { meters: haversineMeters(from, to), seconds: estimatedSecondsFallback(from, to) };
 }
 
 /** 4 ondalık ≈ 11 m ızgara — aynı hücrede tekrar Matrix ödenmez. */
@@ -90,18 +105,18 @@ function httpsGetJson<T>(url: string, timeoutMs = MATRIX_HTTP_TIMEOUT_MS): Promi
 }
 
 /**
- * Sadece Google API — cache yok. [drivers] ile aynı sırada metre.
+ * Sadece Google API — cache yok. [drivers] ile aynı sırada { meters, seconds }.
  */
-async function fetchMatrixMeters(
+async function fetchMatrixResults(
   pickupLat: number,
   pickupLng: number,
   drivers: { lat: number; lng: number }[],
   apiKey: string,
-): Promise<number[]> {
+): Promise<DrivingResult[]> {
   const pickup: Coordinates = { lat: pickupLat, lng: pickupLng };
   if (drivers.length === 0) return [];
 
-  const out: number[] = [];
+  const out: DrivingResult[] = [];
 
   for (let offset = 0; offset < drivers.length; offset += MAX_MATRIX_ORIGINS_PER_REQUEST) {
     const chunk = drivers.slice(offset, offset + MAX_MATRIX_ORIGINS_PER_REQUEST);
@@ -121,7 +136,7 @@ async function fetchMatrixMeters(
       if (data.status !== 'OK') {
         logger.warn(`[DrivingDistance] Matrix status=${data.status} ${data.error_message ?? ''}`);
         for (const d of chunk) {
-          out.push(haversineMeters({ lat: d.lat, lng: d.lng }, pickup));
+          out.push(haversineFallback({ lat: d.lat, lng: d.lng }, pickup));
         }
         continue;
       }
@@ -131,15 +146,20 @@ async function fetchMatrixMeters(
         const el = row?.elements?.[0];
         const d = chunk[i];
         if (el?.status === 'OK' && el.distance?.value != null && el.distance.value >= 0) {
-          out.push(el.distance.value);
+          const meters = el.distance.value;
+          const seconds =
+            el.duration?.value != null && el.duration.value >= 0
+              ? el.duration.value
+              : estimatedSecondsFallback({ lat: d.lat, lng: d.lng }, pickup);
+          out.push({ meters, seconds });
         } else {
-          out.push(haversineMeters({ lat: d.lat, lng: d.lng }, pickup));
+          out.push(haversineFallback({ lat: d.lat, lng: d.lng }, pickup));
         }
       }
     } catch (e) {
       logger.warn('[DrivingDistance] Matrix HTTP hatası:', e);
       for (const d of chunk) {
-        out.push(haversineMeters({ lat: d.lat, lng: d.lng }, pickup));
+        out.push(haversineFallback({ lat: d.lat, lng: d.lng }, pickup));
       }
     }
   }
@@ -147,24 +167,36 @@ async function fetchMatrixMeters(
   return out;
 }
 
+function parseCachedValue(raw: string): DrivingResult | null {
+  // v2 format: "metre:saniye". Eski v1 (sadece metre) prefix değiştiği için artık
+  // hiç karşılaşılmaz, ama olur da bir ortam eski cache anahtarını taşırsa yine de
+  // güvenli şekilde reddedilir (miss sayılır, Matrix'ten tazelenir).
+  const idx = raw.indexOf(':');
+  if (idx <= 0) return null;
+  const meters = Number(raw.slice(0, idx));
+  const seconds = Number(raw.slice(idx + 1));
+  if (!Number.isFinite(meters) || meters < 0 || !Number.isFinite(seconds) || seconds < 0) return null;
+  return { meters, seconds };
+}
+
 /**
- * Her sürücü konumundan binişe araçla mesafe (m). Sıra korunur.
+ * Her sürücü konumundan binişe araçla mesafe (m) + süre (sn). Sıra korunur.
  * Redis hit → API yok; sadece cache miss için Matrix (maliyet düşük).
  */
-export async function drivingMetersDriverToPickup(
+export async function drivingMetersAndSecondsDriverToPickup(
   pickupLat: number,
   pickupLng: number,
   drivers: { lat: number; lng: number }[],
-): Promise<number[]> {
+): Promise<DrivingResult[]> {
   const pickup: Coordinates = { lat: pickupLat, lng: pickupLng };
   if (drivers.length === 0) return [];
 
   const key = env.GOOGLE_MAPS_API_KEY?.trim();
   if (!key) {
-    return drivers.map((d) => haversineMeters({ lat: d.lat, lng: d.lng }, pickup));
+    return drivers.map((d) => haversineFallback({ lat: d.lat, lng: d.lng }, pickup));
   }
 
-  const results: number[] = new Array(drivers.length);
+  const results: DrivingResult[] = new Array(drivers.length);
   const missIdx: number[] = [];
   const keys: string[] = drivers.map((d) =>
     pairCacheKey(d.lat, d.lng, pickupLat, pickupLng),
@@ -174,12 +206,10 @@ export async function drivingMetersDriverToPickup(
     const cached = await redis.mget(...keys);
     for (let i = 0; i < drivers.length; i++) {
       const raw = cached[i];
-      if (raw != null && raw !== '') {
-        const m = Number(raw);
-        if (Number.isFinite(m) && m >= 0) {
-          results[i] = m;
-          continue;
-        }
+      const parsed = raw != null && raw !== '' ? parseCachedValue(raw) : null;
+      if (parsed) {
+        results[i] = parsed;
+        continue;
       }
       missIdx.push(i);
     }
@@ -194,18 +224,19 @@ export async function drivingMetersDriverToPickup(
   }
 
   const missDrivers = missIdx.map((i) => drivers[i]);
-  const fresh = await fetchMatrixMeters(pickupLat, pickupLng, missDrivers, key);
+  const fresh = await fetchMatrixResults(pickupLat, pickupLng, missDrivers, key);
 
   try {
     const pipe = redis.pipeline();
     for (let j = 0; j < missIdx.length; j++) {
       const i = missIdx[j];
-      const meters = fresh[j] ?? haversineMeters({ lat: drivers[i].lat, lng: drivers[i].lng }, pickup);
-      results[i] = meters;
+      const result =
+        fresh[j] ?? haversineFallback({ lat: drivers[i].lat, lng: drivers[i].lng }, pickup);
+      results[i] = result;
       pipe.setex(
         keys[i],
         getPlatformSettings().drivingDistanceCacheTtlSec,
-        String(Math.round(meters)),
+        `${Math.round(result.meters)}:${Math.round(result.seconds)}`,
       );
     }
     await pipe.exec();
@@ -214,7 +245,7 @@ export async function drivingMetersDriverToPickup(
     for (let j = 0; j < missIdx.length; j++) {
       const i = missIdx[j];
       results[i] =
-        fresh[j] ?? haversineMeters({ lat: drivers[i].lat, lng: drivers[i].lng }, pickup);
+        fresh[j] ?? haversineFallback({ lat: drivers[i].lat, lng: drivers[i].lng }, pickup);
     }
   }
 

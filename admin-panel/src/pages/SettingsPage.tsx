@@ -112,6 +112,37 @@ function PlatformSettingsSection() {
           value={form.matchingOfferWaveSize ?? 1}
           onChange={(v) => setForm({ ...form, matchingOfferWaveSize: Number(v) || 1 })}
         />
+        <NumberInput
+          label="Arama yarıçapı (m)"
+          description="Yakındaki sürücü aranırken taranan çember."
+          min={500}
+          max={20000}
+          value={form.matchingSearchRadiusM ?? 5000}
+          onChange={(v) => setForm({ ...form, matchingSearchRadiusM: Number(v) || 0 })}
+        />
+        <NumberInput
+          label="Yolculuk başına max sürücü"
+          description="Skorlanıp kuyruğa alınacak aday sayısı üst sınırı."
+          min={1}
+          max={10}
+          value={form.matchingMaxDriversPerRide ?? 5}
+          onChange={(v) => setForm({ ...form, matchingMaxDriversPerRide: Number(v) || 0 })}
+        />
+        <NumberInput
+          label="Bant dışı eşiği (art arda timeout)"
+          description="Bu sayıda art arda yanıtsız kalan sürücü geçici olarak bant dışı kalır."
+          min={2}
+          max={10}
+          value={form.matchingTimeoutBanThreshold ?? 3}
+          onChange={(v) => setForm({ ...form, matchingTimeoutBanThreshold: Number(v) || 0 })}
+        />
+        <NumberInput
+          label="Bant dışı süresi (sn)"
+          min={60}
+          max={3600}
+          value={form.matchingTimeoutBanSeconds ?? 600}
+          onChange={(v) => setForm({ ...form, matchingTimeoutBanSeconds: Number(v) || 0 })}
+        />
       </SimpleGrid>
       <Title order={5} mt="lg" mb="xs">
         Taksi Tarifesi

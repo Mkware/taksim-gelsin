@@ -21,10 +21,20 @@
  *   kabullerde kaybeden sürücüden kesinti yapılmaz. Kabulde dalganın kalanına
  *   `accepted_by_other` iptali gider.
  *
+ * SIRALAMA: metre değil SÜRE (ETA). Google Distance Matrix zaten süreyi de döndürüyor;
+ *   trafik/tek yön gibi durumlarda "en yakın metre" yanıltıcı olabiliyordu (400m ama
+ *   8dk süren sürücü, 600m ama 3dk süren sürücünün önüne geçebiliyordu). Artık bantlama
+ *   ve skorun "mesafe" bileşeni saniye (duration_s) üzerinden hesaplanıyor.
+ *
+ * İKİNCİ DALGA ARAMASI: Kuyruk tükenip hiç açık teklif kalmayınca (bir kez, ride başına)
+ *   "sürücü bulunamadı" demeden önce yeniden aday araması yapılır — o ana kadar geçen
+ *   sürede yeni çevrimiçi olan veya başka çağrıdan boşalan sürücüler değerlendirilebilsin.
+ *   Bu ikinci arama da boş dönerse yolculuk normal şekilde iptal edilir.
+ *
  * CEZA SİSTEMİ:
  *   - Yanıt süresi dolunca timeout → kabul_oranı düşer (kalıcı etki) — süre admin `platform_settings`.
  *   - Timeout cezası Redis'te TTL ile tutulur (geçici bant dışı)
- *   - 3 art arda timeout → 10 dk bant dışı
+ *   - N art arda timeout → bant dışı (N ve süre admin `platform_settings`: matchingTimeoutBanThreshold/Seconds)
  */
 
 import { redis } from '../config/redis';
@@ -37,9 +47,9 @@ import {
 } from './platform_settings.service';
 import { notificationService } from './notification.service';
 import { notifyRideCancelledByFcm } from './push_notification.service';
-import { drivingMetersDriverToPickup } from './driving_distance.service';
+import { drivingMetersAndSecondsDriverToPickup } from './driving_distance.service';
 import { logger } from '../utils/logger';
-import { haversineDistance } from '../utils/distance';
+import { haversineDistance, estimateArrivalTime } from '../utils/distance';
 import { decodeEwkbPoint } from '../utils/geo';
 import {
   driverOfferRedisTtlSecondsFromMs,
@@ -49,20 +59,18 @@ import {
 
 // ─── Sabitler ────────────────────────────────────────────────────────────────
 
-const MAX_DRIVERS_PER_RIDE       = 5;
-/** Dalga > 1 iken kuyruk kapasitesi — her dalga için ~3 tur aday bulunsun. */
-function queueCapForWave(waveSize: number): number {
-  return Math.max(MAX_DRIVERS_PER_RIDE, waveSize * 3);
+/** Dalga > 1 iken kuyruk kapasitesi — her dalga için ~3 tur aday bulunsun.
+ *  maxDriversPerRide admin `platform_settings.matchingMaxDriversPerRide`'dan gelir. */
+function queueCapForWave(waveSize: number, maxDriversPerRide: number): number {
+  return Math.max(maxDriversPerRide, waveSize * 3);
 }
-const SEARCH_RADIUS_METERS       = 5_000;
-/** Skorun (puan/kabul oranı/adalet) fiilen devreye girmesi için mesafe bandı genişliği.
- *  Bu bant içindeki sürücüler arasında en yakın metre değil, en iyi skor kazanır. */
-const DISTANCE_BAND_M            = 400;
+/** Skorun (puan/kabul oranı/adalet) fiilen devreye girmesi için süre (ETA) bandı genişliği (sn).
+ *  Bu bant içindeki sürücüler arasında en kısa süre değil, en iyi skor kazanır.
+ *  ~400m'lik önceki mesafe bandına şehir içi trafikte kabaca denk düşen süre. */
+const DURATION_BAND_S            = 90;
 /** Ağ gecikmesi / son saniye kabul için sunucu timeout’u admin süresinden biraz uzun tutulur (UI deadline aynı). */
 const DRIVER_RESPONSE_END_GRACE_MS = 400;
 const QUEUE_TTL_S                = 300;
-const TIMEOUT_PENALTY_TTL_S      = 600;   // 10 dk bant dışı (3 art arda timeout)
-const CONSECUTIVE_TIMEOUT_LIMIT  = 3;     // kaç art arda timeout → bant dışı
 
 /** driver.handler ile aynı — canlı socket eşlemesi (hayalet çevrimiçi filtre) */
 export const DRIVER_SOCKET_KEY = 'driver:socket:';
@@ -92,6 +100,9 @@ export const REDIS_KEYS = {
   driverStats      : (driverId: string) => `driver:stats:${driverId}`,       // günlük istatistik
   driverPenalty    : (driverId: string) => `driver:penalty:${driverId}`,     // bant dışı flag
   timeoutStreak    : (driverId: string) => `driver:timeout_streak:${driverId}`, // art arda timeout sayısı
+  /** Kuyruk tükendiğinde "ikinci dalga" yeniden aramasının ride başına yalnızca BİR KEZ
+   *  çalıştığını garanti eden bayrak (SET NX). */
+  retrySearchUsed  : (rideId: string) => `ride:matching:retry_used:${rideId}`,
 } as const;
 
 /**
@@ -124,7 +135,8 @@ export interface NearbyDriver {
   lng         : number;
   rating      : number;       // 1.0 – 5.0
   rating_count: number;
-  distance_m  : number;       // pickup'a mesafe (metre)
+  distance_m  : number;       // pickup'a mesafe (metre) — yalnızca gösterim/log, sıralama duration_s kullanır
+  duration_s  : number;       // pickup'a araçla süre (saniye) — bantlama ve skor bunu kullanır
 }
 
 /** RPC çıktısı — henüz yol mesafesi eklenmemiş aday */
@@ -147,7 +159,7 @@ interface ScoredDriver extends NearbyDriver {
   stats       : DriverStats;
   score       : number;           // 0 – 100 arası normalize skor
   scoreBreakdown: {               // debug / gözlemlenebilirlik için
-    distance      : number;
+    eta           : number;       // süre (ETA) bileşeni — eskiden "distance" (metre)
     dailyRides    : number;
     rating        : number;
     acceptanceRate: number;
@@ -354,18 +366,20 @@ async function filterCandidatesForRide<T extends { id: string }>(
 // ─── Timeout Ceza Uygula ──────────────────────────────────────────────────────
 
 async function applyTimeoutPenalty(driverId: string): Promise<void> {
+  const settings = getPlatformSettings();
+
   // Art arda timeout sayacını artır
   const streakKey = REDIS_KEYS.timeoutStreak(driverId);
   const streak    = await redis.incr(streakKey);
-  await redis.expire(streakKey, TIMEOUT_PENALTY_TTL_S);
+  await redis.expire(streakKey, settings.matchingTimeoutBanSeconds);
 
   logger.info(`[SmartMatching] Timeout streak for driver ${driverId}: ${streak}`);
 
-  if (streak >= CONSECUTIVE_TIMEOUT_LIMIT) {
-    // 3 art arda timeout → 10 dk bant dışı
-    await redis.setex(REDIS_KEYS.driverPenalty(driverId), TIMEOUT_PENALTY_TTL_S, '1');
+  if (streak >= settings.matchingTimeoutBanThreshold) {
+    // N art arda timeout → bant dışı (N ve süre admin `platform_settings`)
+    await redis.setex(REDIS_KEYS.driverPenalty(driverId), settings.matchingTimeoutBanSeconds, '1');
     await redis.del(streakKey);
-    logger.warn(`[SmartMatching] Driver ${driverId} temporarily banned for ${TIMEOUT_PENALTY_TTL_S}s`);
+    logger.warn(`[SmartMatching] Driver ${driverId} temporarily banned for ${settings.matchingTimeoutBanSeconds}s`);
   }
 
   // Kabul oranını DB'ye düşür (kalıcı etki)
@@ -433,12 +447,12 @@ export async function scoreAndRankDrivers(
   const statsArray = await Promise.all(eligible.map(d => loadDriverStats(d.id)));
 
   // Normalize için min/max hesapla
-  const distances    = eligible.map(d => d.distance_m);
+  const durations    = eligible.map(d => d.duration_s);
   const dailyRides   = statsArray.map(s => s.dailyRides);
   const ratings      = eligible.map(d => d.rating);
   const acceptRates  = statsArray.map(s => s.acceptanceRate);
 
-  const minDist  = Math.min(...distances),    maxDist  = Math.max(...distances);
+  const minDur   = Math.min(...durations),    maxDur   = Math.max(...durations);
   const minRides = Math.min(...dailyRides),   maxRides = Math.max(...dailyRides);
   const minRate  = Math.min(...ratings),      maxRate  = Math.max(...ratings);
   const minAcc   = Math.min(...acceptRates),  maxAcc   = Math.max(...acceptRates);
@@ -447,8 +461,8 @@ export async function scoreAndRankDrivers(
     const stats = statsArray[i];
 
     const breakdown = {
-      // Mesafe: az mesafe → yüksek skor (asc)
-      distance      : normalize(driver.distance_m,       minDist,  maxDist,  'asc'),
+      // ETA: az süre → yüksek skor (asc). Metre değil süre — trafik/tek yön yanıltmasın.
+      eta           : normalize(driver.duration_s,       minDur,   maxDur,   'asc'),
       // Günlük yolculuk: az yolculuk → yüksek skor (asc) — adalet
       dailyRides    : normalize(stats.dailyRides,        minRides, maxRides, 'asc'),
       // Rating: yüksek puan → yüksek skor (desc)
@@ -458,7 +472,7 @@ export async function scoreAndRankDrivers(
     };
 
     const score = (
-      breakdown.distance       * WEIGHTS.distance       +
+      breakdown.eta             * WEIGHTS.distance       +
       breakdown.dailyRides     * WEIGHTS.dailyRides     +
       breakdown.rating         * WEIGHTS.rating         +
       breakdown.acceptanceRate * WEIGHTS.acceptanceRate
@@ -467,15 +481,14 @@ export async function scoreAndRankDrivers(
     return { ...driver, stats, score, scoreBreakdown: breakdown };
   });
 
-  // Mesafe bandına göre sırala (DISTANCE_BAND_M genişliğinde), bant içinde skor belirleyici.
-  // Önceki sürüm ham metreyle sıralıyordu ve yalnızca 1 metreden az fark varsa skora
-  // bakıyordu — pratikte iki sürücü neredeyse hiç bu kadar yakın çıkmadığından skor
-  // (puan, kabul oranı, günlük yolculuk adaleti) fiilen hiçbir zaman devreye girmiyordu.
-  // Bant genişse "en yakın önce" sezgisi korunur; aynı banttaki adaylar arasında ise
+  // Süre (ETA) bandına göre sırala (DURATION_BAND_S genişliğinde), bant içinde skor belirleyici.
+  // Önceden ham metreyle sıralanıyordu; trafik/tek yön yollarda "en yakın metre" yanıltıcı
+  // olabiliyordu (400m ama 8dk süren sürücü, 600m ama 3dk süren sürücünün önüne geçebiliyordu).
+  // Bant genişse "en kısa süre önce" sezgisi korunur; aynı banttaki adaylar arasında ise
   // en iyi profil öne çıkar.
   scored.sort((a, b) => {
-    const bandA = Math.floor(a.distance_m / DISTANCE_BAND_M);
-    const bandB = Math.floor(b.distance_m / DISTANCE_BAND_M);
+    const bandA = Math.floor(a.duration_s / DURATION_BAND_S);
+    const bandB = Math.floor(b.duration_s / DURATION_BAND_S);
     if (bandA !== bandB) {
       return bandA - bandB;
     }
@@ -483,13 +496,14 @@ export async function scoreAndRankDrivers(
     if (Math.abs(byScore) > 1e-6) {
       return byScore;
     }
-    return a.distance_m - b.distance_m;
+    return a.duration_s - b.duration_s;
   });
 
   logger.info('[SmartMatching] Driver ranking:', scored.map(d => ({
     id           : d.id,
     score        : d.score.toFixed(1),
     distance_m   : d.distance_m,
+    duration_s   : d.duration_s,
     dailyRides   : d.stats.dailyRides,
     rating       : d.rating,
     acceptanceRate: (d.stats.acceptanceRate * 100).toFixed(0) + '%',
@@ -553,30 +567,33 @@ async function notifyCustomerMatchingProgress(
 
 // ─── ANA EŞLEŞTİRME FONKSİYONU ───────────────────────────────────────────────
 
-export async function startSmartMatching(
-  rideId     : string,
-  pickupLat  : number,
-  pickupLng  : number,
-  customerId : string,
-): Promise<void> {
-
-  logger.info(`[SmartMatching] Starting for ride ${rideId}`);
-
-  // Sweeper bağlamı (customer + pickup) — restart sonrası bu sayede ilerlenebilir.
-  await saveMatchingContext(rideId, { customerId, pickupLat, pickupLng });
+/**
+ * Yakındaki sürücüleri arar, filtreler, skorlar ve kuyruğa ekler.
+ * Hem ilk aramada (`startSmartMatching`) hem kuyruk tükenince tek seferlik "ikinci dalga"
+ * yeniden aramasında (bkz. `retrySearchOnce` / `_fillOfferWaveInner`) kullanılır — ikinci
+ * çağrıda `ride:rejected:{rideId}` seti zaten dolu olduğundan daha önce reddeden sürücülere
+ * tekrar teklif gitmez.
+ *
+ * @returns kuyruğa eklenen sürücü sayısı (0 = hiç aday bulunamadı/uygun değil).
+ */
+async function searchAndEnqueueDrivers(
+  rideId    : string,
+  pickupLat : number,
+  pickupLng : number,
+): Promise<number> {
+  const settings = getPlatformSettings();
 
   // 1. Yakındaki sürücüleri bul
   const { data: nearbyRaw, error } = await supabaseAdmin.rpc('find_nearby_drivers', {
     lat           : pickupLat,
     lng           : pickupLng,
-    radius_meters : SEARCH_RADIUS_METERS,
+    radius_meters : settings.matchingSearchRadiusM,
     max_results   : 20, // havada ön seçim + Matrix ile daraltılır
   });
 
   if (error || !nearbyRaw?.length) {
     logger.warn(`[SmartMatching] No nearby drivers for ride ${rideId}`);
-    await handleNoDriversAvailable(rideId, customerId);
-    return;
+    return 0;
   }
 
   // PostGIS / RPC ile kuş uçumu çemberinden ham adaylar
@@ -600,8 +617,7 @@ export async function startSmartMatching(
   const parsedEligible = await filterCandidatesForRide(parsed, rideId);
   if (parsedEligible.length === 0) {
     logger.warn(`[SmartMatching] No eligible drivers after DB/Redis filter for ride ${rideId}`);
-    await handleNoDriversAvailable(rideId, customerId);
-    return;
+    return 0;
   }
 
   // Önce kuş uçumuna göre sırala — Google Matrix yalnızca en yakın N adaya (maliyet ↓, performans ↑)
@@ -610,53 +626,102 @@ export async function startSmartMatching(
     air_m: haversineDistance(pickupLat, pickupLng, p.lat, p.lng) * 1000,
   }));
   withAir.sort((a, b) => a.air_m - b.air_m);
-  const preselected = withAir.slice(0, getPlatformSettings().matchingRoadMatrixMaxDrivers);
+  const preselected = withAir.slice(0, settings.matchingRoadMatrixMaxDrivers);
 
-  const drivingMeters = await drivingMetersDriverToPickup(
+  const driving = await drivingMetersAndSecondsDriverToPickup(
     pickupLat,
     pickupLng,
     preselected.map((p) => ({ lat: p.lat, lng: p.lng })),
   );
 
-  const nearby: NearbyDriver[] = preselected.map((p, i) => ({
-    id: p.id,
-    lat: p.lat,
-    lng: p.lng,
-    rating: p.rating,
-    rating_count: p.rating_count,
-    distance_m:
-      drivingMeters[i] ??
-      haversineDistance(pickupLat, pickupLng, p.lat, p.lng) * 1000,
-  }));
+  const nearby: NearbyDriver[] = preselected.map((p, i) => {
+    const airM = haversineDistance(pickupLat, pickupLng, p.lat, p.lng) * 1000;
+    return {
+      id: p.id,
+      lat: p.lat,
+      lng: p.lng,
+      rating: p.rating,
+      rating_count: p.rating_count,
+      distance_m: driving[i]?.meters ?? airM,
+      duration_s: driving[i]?.seconds ?? Math.round(estimateArrivalTime(
+        { lat: pickupLat, lng: pickupLng },
+        { lat: p.lat, lng: p.lng },
+      ) * 60),
+    };
+  });
 
-  // 2. Reddeden sürücüleri Redis'ten yükle
+  // 2. Reddeden sürücüleri Redis'ten yükle (ikinci dalgada da geçerli — önceki ret tekrar sorulmaz)
   const rejectedRaw = await redis.smembers(REDIS_KEYS.rejected(rideId));
   const rejectedIds = new Set(rejectedRaw);
 
-  // 3. Skor hesapla ve sırala (mesafe bandı + skor — bkz. scoreAndRankDrivers)
+  // 3. Skor hesapla ve sırala (süre bandı + skor — bkz. scoreAndRankDrivers)
   const ranked = await scoreAndRankDrivers(nearby, rejectedIds);
+  if (ranked.length === 0) return 0;
 
-  if (ranked.length === 0) {
+  // 4. En iyi adayları Redis LIST olarak yaz (LPOP = atomik sıra) — dalga boyutuna göre kapasite
+  const queue = ranked
+    .slice(0, queueCapForWave(settings.matchingOfferWaveSize, settings.matchingMaxDriversPerRide))
+    .map(d => d.id);
+  if (queue.length === 0) return 0;
+
+  const qKey = REDIS_KEYS.matchingQueue(rideId);
+  await redis.rpush(qKey, ...queue);
+  await redis.expire(qKey, QUEUE_TTL_S);
+  await redis.incrby(REDIS_KEYS.matchingQueuedTotal(rideId), queue.length);
+  await redis.expire(REDIS_KEYS.matchingQueuedTotal(rideId), QUEUE_TTL_S);
+
+  return queue.length;
+}
+
+/**
+ * İkinci dalga araması: kuyruk tükenip hiç açık teklif kalmadığında, ride başına yalnızca
+ * BİR KEZ çalışacak şekilde `retrySearchUsed` bayrağıyla korunur (SET NX — eşzamanlı
+ * çağrılar birbirini tekrar tetiklemez). `_fillOfferWaveInner` çağırır.
+ *
+ * @returns yeni kuyruğa eklenen sürücü sayısı (0 = ya zaten bir kez denenmiş, ya da
+ *          ikinci arama da aday bulamadı).
+ */
+async function retrySearchOnce(
+  rideId    : string,
+  pickupLat : number,
+  pickupLng : number,
+): Promise<number> {
+  const firstAttempt = await redis.set(REDIS_KEYS.retrySearchUsed(rideId), '1', 'EX', QUEUE_TTL_S, 'NX');
+  if (!firstAttempt) return 0; // bu ride için ikinci dalga zaten denendi
+
+  logger.info(`[SmartMatching] Kuyruk tükendi — ikinci (son) arama denemesi ride=${rideId}`);
+  const count = await searchAndEnqueueDrivers(rideId, pickupLat, pickupLng);
+  if (count > 0) {
+    logger.info(`[SmartMatching] İkinci arama ${count} yeni aday buldu ride=${rideId}`);
+  } else {
+    logger.info(`[SmartMatching] İkinci arama da aday bulamadı ride=${rideId}`);
+  }
+  return count;
+}
+
+export async function startSmartMatching(
+  rideId     : string,
+  pickupLat  : number,
+  pickupLng  : number,
+  customerId : string,
+): Promise<void> {
+
+  logger.info(`[SmartMatching] Starting for ride ${rideId}`);
+
+  // Sweeper bağlamı (customer + pickup) — restart sonrası bu sayede ilerlenebilir.
+  await saveMatchingContext(rideId, { customerId, pickupLat, pickupLng });
+
+  await redis.del(REDIS_KEYS.matchingQueue(rideId));
+  const queuedCount = await searchAndEnqueueDrivers(rideId, pickupLat, pickupLng);
+  if (queuedCount === 0) {
     await handleNoDriversAvailable(rideId, customerId);
     return;
   }
 
-  // 4. En iyi adayları Redis LIST olarak yaz (LPOP = atomik sıra) — dalga boyutuna göre kapasite
-  const queue = ranked
-    .slice(0, queueCapForWave(getPlatformSettings().matchingOfferWaveSize))
-    .map(d => d.id);
-  const qKey = REDIS_KEYS.matchingQueue(rideId);
-  await redis.del(qKey);
-  if (queue.length > 0) {
-    await redis.rpush(qKey, ...queue);
-    await redis.expire(qKey, QUEUE_TTL_S);
-  }
-
-  await redis.setex(REDIS_KEYS.matchingQueuedTotal(rideId), QUEUE_TTL_S, String(queue.length));
   await redis.del(REDIS_KEYS.matchingAskedCount(rideId));
   await notifyCustomerMatchingProgress(rideId, customerId);
 
-  // 5. İlk sürücüye gönder
+  // İlk sürücüye gönder
   await sendRequestToNextDriver(rideId, customerId, pickupLat, pickupLng);
 }
 
@@ -983,6 +1048,13 @@ async function _fillOfferWaveInner(
     const driverId = await acquireNextDriver(rideId, offerLockTtlSeconds, uiDeadlineMs, sweepScoreMs);
     if (!driverId) {
       if (outstanding === 0) {
+        // Kuyruk tükendi ve hiç açık teklif kalmadı — vazgeçmeden önce BİR KEZ (ride başına)
+        // yeniden ara. O ana kadar geçen sürede yeni çevrimiçi olan veya başka çağrıdan
+        // boşalan sürücüler bu ikinci aramada değerlendirilebilir.
+        const requeued = await retrySearchOnce(rideId, pickupLat, pickupLng);
+        if (requeued > 0) {
+          continue; // yeni kuyruk dolduruldu — döngü devam edip devralmayı dener
+        }
         await handleNoDriversAvailable(rideId, customerId);
         return;
       }
@@ -1381,5 +1453,6 @@ export async function clearSmartMatchingQueue(
     redis.del(REDIS_KEYS.matchingCtx(rideId)),
     redis.del(REDIS_KEYS.rejected(rideId)),
     redis.del(REDIS_KEYS.pending(rideId)),
+    redis.del(REDIS_KEYS.retrySearchUsed(rideId)),
   ]);
 }

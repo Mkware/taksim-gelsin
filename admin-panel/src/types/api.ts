@@ -195,6 +195,14 @@ export interface PlatformSettings {
   driverResponseTimeoutSeconds: number;
   /** Aynı anda kaç sürücüye teklif gönderilir (1 = sıralı klasik davranış). */
   matchingOfferWaveSize: number;
+  /** Yakındaki sürücü arama yarıçapı (m). */
+  matchingSearchRadiusM: number;
+  /** Yolculuk başına kuyruğa alınacak max sürücü sayısı. */
+  matchingMaxDriversPerRide: number;
+  /** Kaç art arda timeout sonrası sürücü geçici bant dışı kalır. */
+  matchingTimeoutBanThreshold: number;
+  /** Bant dışı kalma süresi (sn). */
+  matchingTimeoutBanSeconds: number;
   walletCardSimulationEnabled: boolean;
   /** Açılış ücreti (TL) */
   tariffBaseFare: number;
