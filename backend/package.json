@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src/ --ext .ts",
     "test": "vitest run",
+    "test:load-matching": "RUN_MATCHING_LOAD_TEST=1 vitest run tests/load/matching_stress.test.ts --reporter=verbose",
     "check-migrations": "node scripts/check-migrations.mjs"
   },
   "dependencies": {

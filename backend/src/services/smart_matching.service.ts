@@ -1013,6 +1013,31 @@ export async function sendRequestToNextDriver(
 }
 
 /**
+ * Yarış durumu koruması için: yolculuğun hâlâ gerçekten 'searching' olduğunu DB'den
+ * doğrular. Paralel dalgada (matchingOfferWaveSize>1) bir sürücü kabul ederken TAM O ANDA
+ * dalgadaki BAŞKA bir sürücünün teklifi timeout olursa, handleOfferTimeout'un
+ * claimTimeoutSlot'u kabul akışının temizliğinden ÖNCE kazanabilir (o an için geçerli
+ * bir claim'dir). `withMatchingLock` yalnızca `_fillOfferWaveInner`'ın eşzamanlı
+ * çağrılarını serileştirir — kabul akışının temizliği (ride.handler.ts,
+ * clearSmartMatchingQueue) bu kilidi bilerek ALMAZ: kilit tabanlı bir çözüm denenmişti,
+ * ama `withMatchingLock`'ın sınırlı deneme sayısı (25×150ms) var ve yoğun yükte kilit
+ * alınamazsa temizlik SESSİZCE hiç ÇALIŞMIYORDU — bu da sorunu daha da kötüleştiriyordu.
+ * Bunun yerine `_fillOfferWaveInner` her Redis yazımından önce bu kontrolü çalıştırır;
+ * özellikle retrySearchOnce (gerçek find_nearby_drivers/Google Distance Matrix çağrıları
+ * saniyeler sürebilir) SONRASINDA da tekrar kontrol edilir — o olmadan pencere
+ * saniyelerce açık kalıp yolculuk zaten kabul/iptal olduktan SONRA yeni arama/teklif
+ * turu Redis'e yazabiliyordu (bkz. tests/load/matching_stress.test.ts).
+ */
+async function isRideStillSearching(rideId: string): Promise<boolean> {
+  const { data: rideRow } = await supabaseAdmin
+    .from('rides')
+    .select('status')
+    .eq('id', rideId)
+    .maybeSingle();
+  return rideRow?.status === 'searching';
+}
+
+/**
  * Dalgayı doldur: açık teklif sayısı `matchingOfferWaveSize`e ulaşana kadar kuyruktan
  * sürücü devral ve teklif gönder. Kuyruk tükendiğinde:
  *   - hâlâ açık teklif varsa HİÇBİR ŞEY yapma (kabul/timeout sonucu beklenir;
@@ -1025,6 +1050,10 @@ async function _fillOfferWaveInner(
   pickupLat : number,
   pickupLng : number,
 ): Promise<void> {
+  if (!(await isRideStillSearching(rideId))) {
+    logger.info(`[SmartMatching] _fillOfferWaveInner atlandı — yolculuk artık searching değil ride=${rideId}`);
+    return;
+  }
 
   const driverTimeoutMs = getDriverResponseTimeoutMs();
   const serverTimeoutMs = driverTimeoutMs + DRIVER_RESPONSE_END_GRACE_MS;
@@ -1053,6 +1082,17 @@ async function _fillOfferWaveInner(
         // boşalan sürücüler bu ikinci aramada değerlendirilebilir.
         const requeued = await retrySearchOnce(rideId, pickupLat, pickupLng);
         if (requeued > 0) {
+          // retrySearchOnce saniyeler sürebilir (gerçek find_nearby_drivers/Google
+          // Distance Matrix) — bu sırada ride başka bir akışla (kabul/iptal) zaten
+          // sonuçlanmış olabilir. Devam etmeden önce tekrar doğrula; aksi halde az
+          // önce yazdığımız kuyruk/queued_total hiç temizlenmeden kalırdı.
+          if (!(await isRideStillSearching(rideId))) {
+            logger.info(
+              `[SmartMatching] retrySearchOnce sonrası yolculuk artık searching değil, kendi kendine temizleniyor ride=${rideId}`,
+            );
+            await clearSmartMatchingQueue(rideId, false);
+            return;
+          }
           continue; // yeni kuyruk dolduruldu — döngü devam edip devralmayı dener
         }
         await handleNoDriversAvailable(rideId, customerId);
@@ -1456,3 +1496,4 @@ export async function clearSmartMatchingQueue(
     redis.del(REDIS_KEYS.retrySearchUsed(rideId)),
   ]);
 }
+
