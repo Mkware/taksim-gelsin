@@ -36,6 +36,26 @@ function envDefaults(): PlatformOperationalSettings {
       1,
       3,
     ),
+    matchingSearchRadiusM: clamp(
+      Math.floor(Number(process.env.MATCHING_SEARCH_RADIUS_M ?? 5000)),
+      500,
+      20_000,
+    ),
+    matchingMaxDriversPerRide: clamp(
+      Math.floor(Number(process.env.MATCHING_MAX_DRIVERS_PER_RIDE ?? 5)),
+      1,
+      10,
+    ),
+    matchingTimeoutBanThreshold: clamp(
+      Math.floor(Number(process.env.MATCHING_TIMEOUT_BAN_THRESHOLD ?? 3)),
+      2,
+      10,
+    ),
+    matchingTimeoutBanSeconds: clamp(
+      Math.floor(Number(process.env.MATCHING_TIMEOUT_BAN_SECONDS ?? 600)),
+      60,
+      3600,
+    ),
     walletCardSimulationEnabled: env.WALLET_CARD_SIMULATION_ENABLED,
     tariffBaseFare: Number(process.env.TARIFF_BASE_FARE ?? 50),
     tariffPerKmRate: Number(process.env.TARIFF_PER_KM_RATE ?? 50),
@@ -56,6 +76,14 @@ export type PlatformSettingsPatch = Partial<{
   driverResponseTimeoutSeconds: number;
   /** Aynı anda kaç sürücüye teklif gönderilir (paralel dalga). 1 = sıralı (klasik) davranış. */
   matchingOfferWaveSize: number;
+  /** Yakındaki sürücü arama yarıçapı (m). */
+  matchingSearchRadiusM: number;
+  /** Yolculuk başına kuyruğa alınacak (skorlanmış) max sürücü sayısı. */
+  matchingMaxDriversPerRide: number;
+  /** Kaç art arda timeout sonrası sürücü geçici bant dışı kalır. */
+  matchingTimeoutBanThreshold: number;
+  /** Bant dışı kalma süresi + art arda timeout sayacının sıfırlanma penceresi (sn). */
+  matchingTimeoutBanSeconds: number;
   walletCardSimulationEnabled: boolean;
   /** Açılış ücreti (TL) — bkz. modules/ride/pricing.service.ts */
   tariffBaseFare: number;
@@ -75,6 +103,10 @@ export interface PlatformOperationalSettings {
   drivingDistanceCacheTtlSec: number;
   driverResponseTimeoutSeconds: number;
   matchingOfferWaveSize: number;
+  matchingSearchRadiusM: number;
+  matchingMaxDriversPerRide: number;
+  matchingTimeoutBanThreshold: number;
+  matchingTimeoutBanSeconds: number;
   walletCardSimulationEnabled: boolean;
   tariffBaseFare: number;
   tariffPerKmRate: number;
@@ -118,6 +150,26 @@ function mergeFromDbRow(raw: Record<string, unknown> | null | undefined): Platfo
       Math.floor(num(raw.matchingOfferWaveSize, d.matchingOfferWaveSize)),
       1,
       3,
+    ),
+    matchingSearchRadiusM: clamp(
+      Math.floor(num(raw.matchingSearchRadiusM, d.matchingSearchRadiusM)),
+      500,
+      20_000,
+    ),
+    matchingMaxDriversPerRide: clamp(
+      Math.floor(num(raw.matchingMaxDriversPerRide, d.matchingMaxDriversPerRide)),
+      1,
+      10,
+    ),
+    matchingTimeoutBanThreshold: clamp(
+      Math.floor(num(raw.matchingTimeoutBanThreshold, d.matchingTimeoutBanThreshold)),
+      2,
+      10,
+    ),
+    matchingTimeoutBanSeconds: clamp(
+      Math.floor(num(raw.matchingTimeoutBanSeconds, d.matchingTimeoutBanSeconds)),
+      60,
+      3600,
     ),
     walletCardSimulationEnabled: bool(raw.walletCardSimulationEnabled, d.walletCardSimulationEnabled),
     tariffBaseFare: clamp(num(raw.tariffBaseFare, d.tariffBaseFare), 0, 10_000),
@@ -219,6 +271,26 @@ export async function updatePlatformSettings(
       1,
       3,
     ),
+    matchingSearchRadiusM: clamp(
+      Math.floor(Number(patch.matchingSearchRadiusM ?? base.matchingSearchRadiusM)),
+      500,
+      20_000,
+    ),
+    matchingMaxDriversPerRide: clamp(
+      Math.floor(Number(patch.matchingMaxDriversPerRide ?? base.matchingMaxDriversPerRide)),
+      1,
+      10,
+    ),
+    matchingTimeoutBanThreshold: clamp(
+      Math.floor(Number(patch.matchingTimeoutBanThreshold ?? base.matchingTimeoutBanThreshold)),
+      2,
+      10,
+    ),
+    matchingTimeoutBanSeconds: clamp(
+      Math.floor(Number(patch.matchingTimeoutBanSeconds ?? base.matchingTimeoutBanSeconds)),
+      60,
+      3600,
+    ),
     walletCardSimulationEnabled:
       patch.walletCardSimulationEnabled ?? base.walletCardSimulationEnabled,
     tariffBaseFare: clamp(Number(patch.tariffBaseFare ?? base.tariffBaseFare), 0, 10_000),
@@ -239,6 +311,10 @@ export async function updatePlatformSettings(
     drivingDistanceCacheTtlSec: next.drivingDistanceCacheTtlSec,
     driverResponseTimeoutSeconds: next.driverResponseTimeoutSeconds,
     matchingOfferWaveSize: next.matchingOfferWaveSize,
+    matchingSearchRadiusM: next.matchingSearchRadiusM,
+    matchingMaxDriversPerRide: next.matchingMaxDriversPerRide,
+    matchingTimeoutBanThreshold: next.matchingTimeoutBanThreshold,
+    matchingTimeoutBanSeconds: next.matchingTimeoutBanSeconds,
     walletCardSimulationEnabled: next.walletCardSimulationEnabled,
     tariffBaseFare: next.tariffBaseFare,
     tariffPerKmRate: next.tariffPerKmRate,

@@ -29,6 +29,7 @@ describe('eşleştirme akışı: teklif → yanıtsızlık → sıradaki sürüc
   let baseUrl: string;
 
   let sendRequestToNextDriver: typeof import('../../src/services/smart_matching.service').sendRequestToNextDriver;
+  let clearSmartMatchingQueue: typeof import('../../src/services/smart_matching.service').clearSmartMatchingQueue;
   let REDIS_KEYS: typeof import('../../src/services/smart_matching.service').REDIS_KEYS;
   let redis: typeof import('../../src/config/redis').redis;
   let generateAccessToken: typeof import('../../src/utils/jwt').generateAccessToken;
@@ -53,6 +54,7 @@ describe('eşleştirme akışı: teklif → yanıtsızlık → sıradaki sürüc
     const socketManager = await import('../../src/sockets/socket.manager');
 
     sendRequestToNextDriver = smartMatching.sendRequestToNextDriver;
+    clearSmartMatchingQueue = smartMatching.clearSmartMatchingQueue;
     REDIS_KEYS = smartMatching.REDIS_KEYS;
     redis = redisConfig.redis;
     generateAccessToken = jwtUtils.generateAccessToken;
@@ -136,6 +138,12 @@ describe('eşleştirme akışı: teklif → yanıtsızlık → sıradaki sürüc
     const secondOffer = await offer2;
     expect(secondOffer.rideId).toBe(rideId);
     expect(secondOffer.targetDriverId).toBe(driver2Id);
+
+    // driver2'nin teklifi test bitince de açık kalır (in-memory timeout ~5.4sn sonra
+    // ateşlenir) — temizlemezsek bu timer sonraki testler çalışırken tetiklenip
+    // (gerçek find_nearby_drivers ile) başka testin sürücülerini bulup çapraz kirlilik
+    // yaratabilir. Testler arası izolasyon için açıkça temizliyoruz.
+    await clearSmartMatchingQueue(rideId, false);
 
     driver1Socket.disconnect();
     driver2Socket.disconnect();
@@ -258,6 +266,11 @@ describe('eşleştirme akışı: teklif → yanıtsızlık → sıradaki sürüc
       // driver2'nin teklifi hâlâ açık (ret dalganın kalanını etkilemez).
       const driver2Lock = await redis.get(`driver:pending_offer:${driver2Id}`);
       expect(driver2Lock).toBe(rideId);
+
+      // driver2 ve driver3'ün teklifleri test bitince de açık kalır — temizlemezsek
+      // in-memory timeout'ları sonraki testler sırasında ateşlenip (gerçek
+      // find_nearby_drivers ile) çapraz kirliliğe yol açabilir.
+      await clearSmartMatchingQueue(rideId, false);
     } finally {
       driver1Socket.disconnect();
       driver2Socket.disconnect();
@@ -265,4 +278,45 @@ describe('eşleştirme akışı: teklif → yanıtsızlık → sıradaki sürüc
       await settings.updatePlatformSettings({ matchingOfferWaveSize: 1 });
     }
   }, 30_000);
+
+  it('ikinci dalga araması: kuyruk tükenip vazgeçmeden önce YENİDEN arar ve o sırada çevrimiçi olan sürücüyü bulur', async () => {
+    const customerId = await insertCustomer(stack.pool);
+    const driver1Id = await insertDriver(stack.pool, { balance: 50 });
+    const rideId = await insertSearchingRide(stack.pool, customerId, { estimatedPrice: 120 });
+
+    const driver1Socket = await connectDriverSocket(driver1Id);
+    await goOnlineAndWaitConfirmed(driver1Socket);
+
+    // İlk "arama" bu testin kapsamı dışında — kuyruğa yalnızca driver1'i koyuyoruz,
+    // driver2 henüz DB'de/çevrimiçi bile değil (gerçek find_nearby_drivers onu bulamazdı).
+    await redis.rpush(REDIS_KEYS.matchingQueue(rideId), driver1Id);
+
+    const offer1 = new Promise<{ rideId: string; targetDriverId: string }>((resolve) => {
+      driver1Socket.once('ride:new_request', resolve);
+    });
+
+    await sendRequestToNextDriver(rideId, customerId, 39.8468, 33.515);
+    await offer1;
+
+    // driver1'in 5sn+tampon yanıt penceresi dolmadan ÖNCE driver2 sisteme girip
+    // çevrimiçi olur — retrySearchOnce'ın GERÇEK find_nearby_drivers RPC'siyle
+    // onu yakalayabildiğini doğruluyoruz (kuyruğa elle eklenmedi).
+    const driver2Id = await insertDriver(stack.pool, { balance: 50 });
+    const driver2Socket = await connectDriverSocket(driver2Id);
+    await goOnlineAndWaitConfirmed(driver2Socket);
+
+    const offerToDriver2 = new Promise<{ rideId: string; targetDriverId: string }>((resolve) => {
+      driver2Socket.once('ride:new_request', resolve);
+    });
+
+    // driver1 kasıtlı yanıt vermiyor — timeout sonrası kuyruk boşalınca ikinci dalga
+    // araması tetiklenmeli ve gerçek RPC ile driver2'yi bulup teklif göndermeli.
+    const secondWaveOffer = await offerToDriver2;
+    expect(secondWaveOffer.rideId).toBe(rideId);
+    expect(secondWaveOffer.targetDriverId).toBe(driver2Id);
+
+    await clearSmartMatchingQueue(rideId, false);
+    driver1Socket.disconnect();
+    driver2Socket.disconnect();
+  }, 20_000);
 });
