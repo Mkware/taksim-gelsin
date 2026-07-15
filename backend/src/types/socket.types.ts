@@ -82,6 +82,17 @@ export interface RideVerifyPickupCodePayload {
   code: string;
 }
 
+// Sohbet mesajı gönder (müşteri veya sürücü)
+export interface MessageSendPayload {
+  rideId: string;
+  text: string;
+}
+
+// Sohbet geçmişi iste (chat ekranı açıldığında / reconnect sonrası)
+export interface MessageGetHistoryPayload {
+  rideId: string;
+}
+
 // ============================================================
 // SERVER → CLIENT Event'leri
 // ============================================================
@@ -207,6 +218,22 @@ export interface RideRequestCancelledEvent {
   message?: string;
 }
 
+/** Sohbet mesajı — ride room'una yayınlanır (kalıcı değil, sadece Redis'te yolculuk süresince) */
+export interface MessageNewEvent {
+  rideId: string;
+  id: string;
+  senderId: string;
+  senderRole: 'customer' | 'driver';
+  text: string;
+  sentAt: number; // epoch ms
+}
+
+/** Sohbet geçmişi — message:get_history yanıtı */
+export interface MessageHistoryEvent {
+  rideId: string;
+  messages: MessageNewEvent[];
+}
+
 /** Kabul sonrası sürücüye tam biniş/iniş koordinatları */
 export interface RideRevealLocationEvent {
   rideId: string;
@@ -306,6 +333,8 @@ export interface ClientToServerEvents {
   'ride:complete': (payload: RideCompletePayload) => void;
   'ride:cancel': (payload: RideCancelPayload) => void;
   'ride:verify_pickup_code': (payload: RideVerifyPickupCodePayload) => void;
+  'message:send': (payload: MessageSendPayload) => void;
+  'message:get_history': (payload: MessageGetHistoryPayload) => void;
 }
 
 // Oturum sonlandı (başka cihaz girişi veya çıkışta tüm socket'ler)
@@ -345,6 +374,10 @@ export interface ServerToClientEvents {
   'driver:online_confirmed': (payload: DriverOnlineConfirmedEvent) => void;
   /** Yolculuk tamamlama isteği başarısız (ör. yetki, hatalı fiyat) */
   'ride:complete_failed': (payload: { rideId: string; message: string }) => void;
+  /** Yeni sohbet mesajı — ride room'undaki her iki tarafa yayınlanır */
+  'message:new': (payload: MessageNewEvent) => void;
+  /** message:get_history yanıtı */
+  'message:history': (payload: MessageHistoryEvent) => void;
 }
 
 // Socket.io dahili event'ler

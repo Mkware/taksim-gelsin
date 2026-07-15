@@ -407,6 +407,32 @@ export async function notifyRideCancelledByFcm(params: {
   }
 }
 
+/** Sohbet mesajı — alıcı taraf uygulama arka plandayken (Socket.io uyuyorsa) push ile uyandırılır. */
+export async function notifyNewMessagePush(params: {
+  recipientId: string;
+  rideId: string;
+  senderRole: 'customer' | 'driver';
+  text: string;
+}): Promise<void> {
+  const { recipientId, rideId, senderRole, text } = params;
+  const tokenRows = await getTokensForUser(recipientId);
+  if (tokenRows.length === 0) {
+    logger.debug(`[FCM] Mesaj push atlandı (token yok): ride=${rideId} alıcı=${recipientId}`);
+    return;
+  }
+
+  const title = senderRole === 'customer' ? 'Yolcunuzdan mesaj' : 'Sürücünüzden mesaj';
+  const body = text.length > 120 ? `${text.slice(0, 117)}…` : text;
+
+  await sendFcmMulticastToTokens({
+    tokenRows,
+    title,
+    body,
+    data: { type: 'new_message', rideId, senderRole },
+    logSummary: `new_message ride=${rideId} → ${recipientId} tokens=${tokenRows.length}`,
+  });
+}
+
 export type AdminPushAudience = 'all' | 'customers' | 'drivers' | 'user';
 
 export interface AdminPushTarget {
