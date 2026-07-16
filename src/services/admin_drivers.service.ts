@@ -17,7 +17,7 @@ type DriverRow = Record<string, unknown>;
 export async function listAdminDrivers(): Promise<{ items: DriverRow[] }> {
   const { data: drivers, error: driverErr } = await supabaseAdmin
     .from('drivers')
-    .select('id, is_online, is_available, vehicle_plate, vehicle_model, vehicle_color, balance')
+    .select('id, is_online, is_available, vehicle_plate, vehicle_model, vehicle_color, balance, total_rides, acceptance_rate')
     .limit(200);
 
   if (driverErr) {

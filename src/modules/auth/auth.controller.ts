@@ -41,37 +41,6 @@ export async function register(req: Request, res: Response, next: NextFunction):
 }
 
 /**
- * POST /api/v1/auth/register/driver
- * Yeni sürücü kaydı
- * Body: { phone, full_name, password, vehicle_plate, vehicle_model, vehicle_color }
- */
-export async function registerDriver(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const result = await authService.registerDriver(req.body);
-
-    res.status(201).json({
-      success: true,
-      message: 'Sürücü kaydı başarılı. Hoş geldiniz!',
-      data: {
-        user: result.user,
-        driver: result.driver,
-        tokens: {
-          access_token: result.accessToken,
-          refresh_token: result.refreshToken,
-        },
-      },
-    });
-  } catch (error) {
-    if (error instanceof AppError) {
-      next(error);
-      return;
-    }
-    logger.error('Sürücü kaydı hatası:', error);
-    next(new AppError('Sürücü kaydı sırasında beklenmeyen bir hata oluştu.', 500));
-  }
-}
-
-/**
  * POST /api/v1/auth/login
  * Giriş — telefon + şifre ile kimlik doğrulama
  * Body: { phone, password }
