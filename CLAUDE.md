@@ -75,6 +75,7 @@ Shared helpers in `src/services/` are deliberately cross-module (don't fold them
 - JWT access token (15m) + refresh token (30d), signed with separate secrets (`utils/jwt.ts`).
 - Each user row has a `session_version` column. On login the version is bumped, and `disconnectStaleSocketsForUser(userId, activeSessionVersion)` (in `socket.manager.ts`) drops all sockets carrying an older version — this is how "another device logged in" is enforced. The auth middleware caches `session_version` in Redis for 60s (`auth:sv:<userId>`); clear that key (or call `invalidateSessionVersionCache`) after any change.
 - Admin-ness is determined by phone number against `ADMIN_PHONES` (comma-separated E.164 list in env), checked via `isAdminPhone()` in `auth.service.ts`. There is no `is_admin` column.
+- **There is no public driver self-registration.** `POST /auth/register/driver` was removed 16 Tem 2026 — drivers are added manually, only via `POST /api/v1/admin/drivers` (admin-panel's Sürücüler page), which still calls the same `registerDriver()` in `auth.service.ts`. Mobile's `driver_register_screen.dart` and `/auth/register/driver` route were deleted accordingly; only customer self-registration (`POST /auth/register`) remains public.
 
 ### Other gotchas
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ActionIcon,
@@ -15,17 +15,32 @@ import {
   TextInput,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconEdit, IconPlus, IconTrash, IconWallet } from '@tabler/icons-react';
+import {
+  IconArrowsSort,
+  IconEdit,
+  IconPlus,
+  IconSortAscending,
+  IconSortDescending,
+  IconTrash,
+  IconWallet,
+} from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
 import * as adminApi from '../api/admin';
 import { getErrorMessage } from '../api/client';
 import type { DriverItem } from '../types/api';
 
 const DRIVERS_KEY = ['admin', 'drivers'];
+
+type PerformanceSortField = 'total_rides' | 'rating' | 'acceptance_rate';
+
+function driverRating(driver: DriverItem): number {
+  return driver.users?.rating ?? 0;
+}
 
 interface DriverFormValues {
   phone: string;
@@ -56,6 +71,41 @@ export function DriversPage() {
   const [balanceTarget, setBalanceTarget] = useState<DriverItem | null>(null);
   const [balanceAmount, setBalanceAmount] = useState<number | ''>('');
   const [balanceReason, setBalanceReason] = useState('');
+  const [sortField, setSortField] = useState<PerformanceSortField>('total_rides');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const sortedDrivers = useMemo(() => {
+    const list = [...(drivers ?? [])];
+    const value = (d: DriverItem) => (sortField === 'rating' ? driverRating(d) : d[sortField] ?? 0);
+    list.sort((a, b) => (value(a) - value(b)) * (sortDir === 'asc' ? 1 : -1));
+    return list;
+  }, [drivers, sortField, sortDir]);
+
+  function toggleSort(field: PerformanceSortField) {
+    if (field === sortField) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir('desc');
+    }
+  }
+
+  function SortableTh({ field, children }: { field: PerformanceSortField; children: ReactNode }) {
+    const active = sortField === field;
+    const Icon = active ? (sortDir === 'asc' ? IconSortAscending : IconSortDescending) : IconArrowsSort;
+    return (
+      <Table.Th>
+        <UnstyledButton onClick={() => toggleSort(field)}>
+          <Group gap={4} wrap="nowrap">
+            <Text fw={500} size="sm">
+              {children}
+            </Text>
+            <Icon size={14} color={active ? undefined : 'var(--mantine-color-dimmed)'} />
+          </Group>
+        </UnstyledButton>
+      </Table.Th>
+    );
+  }
 
   const form = useForm<DriverFormValues>({ initialValues: EMPTY_FORM });
 
@@ -168,7 +218,11 @@ export function DriversPage() {
         </Button>
       </Group>
 
-      <Table.ScrollContainer minWidth={700}>
+      <Text size="xs" c="dimmed" mb="xs">
+        Performans sıralaması için Puan, Yolculuk veya Kabul % başlığına tıklayın.
+      </Text>
+
+      <Table.ScrollContainer minWidth={900}>
         <Table verticalSpacing="sm" striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
@@ -176,6 +230,9 @@ export function DriversPage() {
               <Table.Th visibleFrom="sm">Telefon</Table.Th>
               <Table.Th>Plaka</Table.Th>
               <Table.Th visibleFrom="md">Araç</Table.Th>
+              <SortableTh field="rating">Puan</SortableTh>
+              <SortableTh field="total_rides">Yolculuk</SortableTh>
+              <SortableTh field="acceptance_rate">Kabul %</SortableTh>
               <Table.Th>Bakiye</Table.Th>
               <Table.Th visibleFrom="sm">Durum</Table.Th>
               <Table.Th>Erişim</Table.Th>
@@ -183,7 +240,7 @@ export function DriversPage() {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {(drivers ?? []).map((driver) => (
+            {sortedDrivers.map((driver) => (
               <Table.Tr key={driver.id}>
                 <Table.Td>
                   <Text fw={500}>{driver.users?.full_name ?? '—'}</Text>
@@ -196,6 +253,9 @@ export function DriversPage() {
                 <Table.Td visibleFrom="md">
                   {driver.vehicle_model} {driver.vehicle_color}
                 </Table.Td>
+                <Table.Td>{driver.users?.rating_count ? driverRating(driver).toFixed(1) : '—'}</Table.Td>
+                <Table.Td>{driver.total_rides}</Table.Td>
+                <Table.Td>{Math.round((driver.acceptance_rate ?? 0) * 100)}%</Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
                     <Text>{driver.balance.toFixed(2)} T</Text>
@@ -255,7 +315,7 @@ export function DriversPage() {
             ))}
             {!isLoading && (drivers ?? []).length === 0 && (
               <Table.Tr>
-                <Table.Td colSpan={8}>
+                <Table.Td colSpan={11}>
                   <Text c="dimmed" ta="center">
                     Kayıtlı sürücü yok.
                   </Text>

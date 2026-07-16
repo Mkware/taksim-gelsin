@@ -28,6 +28,10 @@ class RideBottomSheet extends ConsumerStatefulWidget {
   final VoidCallback onClearDropoff;
   /// Geçmişten seçilen yer (harita/rota güncellenir)
   final ValueChanged<PlaceDetail>? onHistoryPlaceSelected;
+  /// Varış seçiliyken biniş/varış düzenleme arayüzü açık mı — kontrollü (parent state).
+  final bool tripEditorExpanded;
+  final VoidCallback? onExpandTripEditor;
+  final VoidCallback? onCollapseTripEditor;
 
   const RideBottomSheet({
     super.key,
@@ -45,6 +49,9 @@ class RideBottomSheet extends ConsumerStatefulWidget {
     required this.onSelectDropoffOnMap,
     required this.onClearDropoff,
     this.onHistoryPlaceSelected,
+    this.tripEditorExpanded = false,
+    this.onExpandTripEditor,
+    this.onCollapseTripEditor,
   });
 
   @override
@@ -218,6 +225,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     final hasTrip =
         widget.dropoffPosition != null && _estimatedPrice != null;
+    final showEditor = !hasTrip || widget.tripEditorExpanded;
 
     return Container(
       decoration: BoxDecoration(
@@ -254,86 +262,109 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Nereye?',
-                          style: GoogleFonts.inter(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white.withValues(alpha: 0.95),
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                      ),
-                      if (widget.dropoffPosition != null)
-                        TextButton(
-                          onPressed: widget.onClearDropoff,
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            foregroundColor: AppTheme.primaryLight,
-                          ),
+                  if (showEditor) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
                           child: Text(
-                            'Temizle',
+                            'Nereye?',
                             style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.primaryColor,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white.withValues(alpha: 0.95),
+                              letterSpacing: -0.4,
                             ),
                           ),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Alım noktası',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.5),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  _buildPickupBar(context),
-                  const SizedBox(height: 8),
-                  Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(
-                          text: 'Gidilecek yer',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white.withValues(alpha: 0.5),
+                        if (hasTrip && widget.tripEditorExpanded)
+                          TextButton(
+                            onPressed: widget.onCollapseTripEditor,
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              foregroundColor: Colors.white.withValues(alpha: 0.7),
+                            ),
+                            child: Text(
+                              'Kapat',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white.withValues(alpha: 0.7),
+                              ),
+                            ),
                           ),
-                        ),
-                        TextSpan(
-                          text: ' · ',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white.withValues(alpha: 0.32),
+                        if (widget.dropoffPosition != null)
+                          TextButton(
+                            onPressed: widget.onClearDropoff,
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              foregroundColor: AppTheme.primaryLight,
+                            ),
+                            child: Text(
+                              'Temizle',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.primaryColor,
+                              ),
+                            ),
                           ),
-                        ),
-                        TextSpan(
-                          text: 'Ara veya harita',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white.withValues(alpha: 0.36),
-                          ),
-                        ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  _buildNereyeBar(context),
-                  _buildHistorySection(),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Alım noktası',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildPickupBar(context),
+                    const SizedBox(height: 8),
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: 'Gidilecek yer',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          TextSpan(
+                            text: ' · ',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white.withValues(alpha: 0.32),
+                            ),
+                          ),
+                          TextSpan(
+                            text: 'Ara veya harita',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white.withValues(alpha: 0.36),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildNereyeBar(context),
+                    _buildHistorySection(),
+                  ] else ...[
+                    _buildTripSummaryBar(context),
+                  ],
                   if (hasTrip) ...[
                     const SizedBox(height: 8),
                     if (widget.routeAlternatives.length > 1) ...[
@@ -716,7 +747,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      'Harita',
+                      'Haritadan seç',
                       style: GoogleFonts.inter(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
@@ -774,6 +805,109 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
               ),
               Icon(Icons.edit_location_alt_rounded,
                   size: 14, color: Colors.white.withValues(alpha: 0.4)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Varış seçildikten sonraki kompakt özet — biniş/varış tek satırda, "Değiştir"
+  /// ile tam düzenleme arayüzü tekrar açılır. Panelin kısa kalmasını sağlar.
+  Widget _buildTripSummaryBar(BuildContext context) {
+    final pickupText = (widget.pickupAddress?.trim().isNotEmpty ?? false)
+        ? widget.pickupAddress!.trim()
+        : 'Alım noktası';
+    final dropoffText = (widget.dropoffAddress?.trim().isNotEmpty ?? false)
+        ? widget.dropoffAddress!.trim()
+        : 'Varış noktası';
+    return Material(
+      color: AppTheme.brandMidnightElevated,
+      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: widget.onExpandTripEditor,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            border: Border.all(color: AppTheme.brandBorderSubtle, width: 1.5),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 14,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle,
+                        size: 8, color: Colors.white.withValues(alpha: 0.5)),
+                    Container(
+                      width: 1.5,
+                      height: 16,
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      color: AppTheme.brandBorderSubtle,
+                    ),
+                    Icon(Icons.location_on_rounded,
+                        size: 14, color: AppTheme.primaryColor),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pickupText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.75),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      dropoffText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white.withValues(alpha: 0.95),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.edit_rounded,
+                      size: 13, color: AppTheme.primaryColor),
+                  const SizedBox(width: 3),
+                  Text(
+                    'Değiştir',
+                    style: GoogleFonts.inter(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                ],
+              ),
+              IconButton(
+                onPressed: widget.onClearDropoff,
+                icon: Icon(Icons.close_rounded,
+                    size: 16, color: Colors.white.withValues(alpha: 0.55)),
+                padding: const EdgeInsets.only(left: 4),
+                constraints: const BoxConstraints(),
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Temizle',
+              ),
             ],
           ),
         ),

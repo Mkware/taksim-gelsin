@@ -48,6 +48,8 @@ export interface DriverItem {
   vehicle_model: string;
   vehicle_color: string;
   balance: number;
+  total_rides: number;
+  acceptance_rate: number;
   users: {
     full_name: string;
     phone: string;

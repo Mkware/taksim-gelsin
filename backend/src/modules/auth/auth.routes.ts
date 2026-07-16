@@ -3,11 +3,14 @@
  * Kayıt, giriş, token yenileme ve çıkış endpoint'leri.
  *
  * POST /register          → Müşteri kaydı
- * POST /register/driver   → Sürücü kaydı
  * POST /login             → Giriş
  * POST /refresh           → Token yenileme
  * POST /logout            → Çıkış (JWT gerekli)
  * GET  /me                → Mevcut kullanıcı bilgisi (JWT gerekli)
+ *
+ * Not: sürücü kaydı artık burada yok — sürücüler admin panelinden manuel eklenir
+ * (`POST /api/v1/admin/drivers`, bkz. `admin_drivers.service.ts`). Genel kullanıma
+ * açık bir sürücü kayıt endpoint'i, "manuel ekleme" politikasını atlayabileceği için kaldırıldı.
  */
 
 import { Router } from 'express';
@@ -15,12 +18,7 @@ import rateLimit from 'express-rate-limit';
 import * as authController from './auth.controller';
 import { validate } from '../../middleware/validate.middleware';
 import { authMiddleware, authMiddlewareLogout } from '../../middleware/auth.middleware';
-import {
-  registerSchema,
-  driverRegisterSchema,
-  loginSchema,
-  refreshTokenSchema,
-} from './auth.schema';
+import { registerSchema, loginSchema, refreshTokenSchema } from './auth.schema';
 
 const router = Router();
 
@@ -72,14 +70,6 @@ const registerLimiter = rateLimit({
 
 // Müşteri kaydı — Zod ile body doğrulaması yapıldıktan sonra controller'a yönlendirilir
 router.post('/register', registerLimiter, validate(registerSchema), authController.register);
-
-// Sürücü kaydı — araç bilgileri dahil doğrulama
-router.post(
-  '/register/driver',
-  registerLimiter,
-  validate(driverRegisterSchema),
-  authController.registerDriver
-);
 
 // Giriş — telefon + şifre (brute-force koruması)
 router.post('/login', loginLimiter, validate(loginSchema), authController.login);

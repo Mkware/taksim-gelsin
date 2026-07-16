@@ -34,13 +34,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _Header(
-            name: user?.fullName ?? '—',
-            phone: user?.phone ?? '',
-            rating: user?.rating ?? 0,
-            ratingCount: user?.ratingCount ?? 0,
-            isDriver: isDriver,
-          ),
+          const _Header(),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
@@ -76,17 +70,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 const SizedBox(height: 10),
 
                 if (isDriver) ...[
-                  AnimatedEntry(
-                    order: 2,
-                    child: _MenuTile(
-                      icon: Icons.payments_rounded,
-                      title: 'Kazançlarım',
-                      subtitle: 'Günlük, haftalık ve toplam kazanç',
-                      color: AppTheme.success,
-                      onTap: () => context.push('/driver/earnings'),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   AnimatedEntry(
                     order: 3,
                     child: _MenuTile(
@@ -217,179 +200,39 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 // ============================================================
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.name,
-    required this.phone,
-    required this.rating,
-    required this.ratingCount,
-    required this.isDriver,
-  });
-
-  final String name;
-  final String phone;
-  final double rating;
-  final int ratingCount;
-  final bool isDriver;
+  const _Header();
 
   @override
   Widget build(BuildContext context) {
-    final displayRating = ratingCount > 0 ? rating : 0.0;
-    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
-
     return Container(
       decoration: const BoxDecoration(
         gradient: AppTheme.inkGradient,
       ),
       child: SafeArea(
         bottom: false,
-        child: Stack(
-          children: [
-            // Dekoratif orb'lar
-            Positioned(
-              top: -40,
-              right: -30,
-              child: _orb(160, AppTheme.primaryColor.withOpacity(0.18)),
-            ),
-            Positioned(
-              bottom: -20,
-              left: -40,
-              child: _orb(120, AppTheme.info.withOpacity(0.12)),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-              child: Column(
-                children: [
-                  // Üst çubuk
-                  Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white),
-                        onPressed: () => Navigator.of(context).maybePop(),
-                      ),
-                      const Spacer(),
-                      const Text(
-                        'Profil',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                      const Spacer(),
-                      const SizedBox(width: 48),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-
-                  // Avatar — Hero uyumlu (geçişte taşma çizgisi: clipBehavior + FittedBox)
-                  Hero(
-                    tag: AppTheme.brandHeroTag,
-                    child: Container(
-                      width: 68,
-                      height: 68,
-                      clipBehavior: Clip.antiAlias,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: AppTheme.primaryGradient,
-                        boxShadow: AppTheme.primaryGlow(opacity: 0.45),
-                      ),
-                      alignment: Alignment.center,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Text(
-                            initial,
-                            style: const TextStyle(
-                              color: AppTheme.ink,
-                              fontSize: 26,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // İsim
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 19,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-
-                  // Telefon + rol rozeti
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        phone,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 13,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: (isDriver ? AppTheme.success : AppTheme.primaryColor)
-                              .withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: (isDriver ? AppTheme.success : AppTheme.primaryColor)
-                                .withOpacity(0.6),
-                          ),
-                        ),
-                        child: Text(
-                          isDriver ? 'SÜRÜCÜ' : 'MÜŞTERİ',
-                          style: TextStyle(
-                            color: isDriver ? AppTheme.success : AppTheme.primaryColor,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${displayRating.toStringAsFixed(1)} · $ratingCount değerlendirme',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.72),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white),
+                onPressed: () => Navigator.of(context).maybePop(),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _orb(double size, Color color) {
-    return IgnorePointer(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(colors: [color, color.withValues(alpha: 0)]),
+              const Spacer(),
+              const Text(
+                'Profil',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const Spacer(),
+              const SizedBox(width: 48),
+            ],
+          ),
         ),
       ),
     );

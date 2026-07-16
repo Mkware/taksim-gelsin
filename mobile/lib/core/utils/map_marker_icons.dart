@@ -106,6 +106,100 @@ class MapMarkerIcons {
     return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
   }
 
+  /// Konum baloncuğu — biniş noktasının üstünde (koyu zemin, beyaz yazı).
+  static Future<BitmapDescriptor> buildOriginLabelMarker(String text) {
+    return _buildLabelBubbleMarker(
+      text,
+      background: AppTheme.ink,
+      foreground: const Color(0xFFFFFFFF),
+    );
+  }
+
+  /// Varış baloncuğu — adresi gösterir (marka rengi zemin, koyu yazı).
+  static Future<BitmapDescriptor> buildDestinationLabelMarker(String text) {
+    return _buildLabelBubbleMarker(
+      text,
+      background: AppTheme.primaryColor,
+      foreground: AppTheme.ink,
+    );
+  }
+
+  /// Metin baloncuğu + alttan sivri kuyruklu pin — konum adı etiketi.
+  /// Metin dinamik olduğundan (statik ikonların aksine) her çağrıda yeniden çizilir.
+  static Future<BitmapDescriptor> _buildLabelBubbleMarker(
+    String text, {
+    required Color background,
+    required Color foreground,
+  }) async {
+    final label = _truncateLabel(text.trim(), 28);
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label.isEmpty ? ' ' : label,
+        style: TextStyle(
+          color: foreground,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 440);
+
+    const hPad = 16.0;
+    const vPad = 10.0;
+    const tailHeight = 12.0;
+    const tailWidth = 16.0;
+    const dotOuterRadius = 7.0;
+    const dotInnerRadius = 3.5;
+    const dotGap = 3.0;
+    const bubbleRadius = 14.0;
+
+    final bubbleWidth = textPainter.width + hPad * 2;
+    final bubbleHeight = textPainter.height + vPad * 2;
+    final totalWidth = bubbleWidth;
+    final totalHeight = bubbleHeight + tailHeight + dotOuterRadius * 2 + dotGap;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    final bubbleRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 3, bubbleWidth, bubbleHeight),
+      const Radius.circular(bubbleRadius),
+    );
+
+    final shadowPaint = Paint()
+      ..color = const Color(0x40000000)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+    canvas.drawRRect(bubbleRect, shadowPaint);
+    canvas.drawRRect(bubbleRect, Paint()..color = background);
+
+    final tailCenterX = bubbleWidth / 2;
+    final tailPath = Path()
+      ..moveTo(tailCenterX - tailWidth / 2, bubbleHeight)
+      ..lineTo(tailCenterX + tailWidth / 2, bubbleHeight)
+      ..lineTo(tailCenterX, bubbleHeight + tailHeight)
+      ..close();
+    canvas.drawPath(tailPath, Paint()..color = background);
+
+    textPainter.paint(canvas, Offset(hPad, vPad));
+
+    final dotCenter = Offset(
+      tailCenterX,
+      bubbleHeight + tailHeight + dotGap + dotOuterRadius,
+    );
+    canvas.drawCircle(dotCenter, dotOuterRadius, Paint()..color = const Color(0xFFFFFFFF));
+    canvas.drawCircle(dotCenter, dotInnerRadius, Paint()..color = background);
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(totalWidth.ceil(), totalHeight.ceil());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
+  static String _truncateLabel(String text, int maxChars) {
+    if (text.length <= maxChars) return text;
+    return '${text.substring(0, maxChars - 1)}…';
+  }
+
   static Future<BitmapDescriptor> _buildUserLocationMarker() async {
     const double size = 96;
     final recorder = ui.PictureRecorder();

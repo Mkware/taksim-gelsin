@@ -189,24 +189,6 @@ class ApiService {
     });
   }
 
-  Future<Response> registerDriver({
-    required String phone,
-    required String fullName,
-    required String password,
-    required String vehiclePlate,
-    required String vehicleModel,
-    required String vehicleColor,
-  }) {
-    return _dio.post('/auth/register/driver', data: {
-      'phone': phone,
-      'full_name': fullName,
-      'password': password,
-      'vehicle_plate': vehiclePlate,
-      'vehicle_model': vehicleModel,
-      'vehicle_color': vehicleColor,
-    });
-  }
-
   Future<Response> login({
     required String phone,
     required String password,

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/ride_model.dart';
 import '../../providers/providers.dart';
+import '../../widgets/ride_chat_sheet.dart';
 
 /// Sürücü aktif yolculuk — kenarlardan boşluklu yüzer kart, üstte durum, altta net CTA.
 class ActiveRidePanel extends ConsumerStatefulWidget {
@@ -61,6 +62,15 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
     final normalized = phone.replaceAll(' ', '');
     final uri = Uri.parse('tel:$normalized');
     final ok = await launchUrl(uri);
+    if (!ok && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Arama başlatılamadı.')),
+      );
+    }
+  }
+
+  Future<void> _callEmergency() async {
+    final ok = await launchUrl(Uri.parse('tel:112'));
     if (!ok && mounted) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(content: Text('Arama başlatılamadı.')),
@@ -235,27 +245,58 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
             ),
           ],
         ),
-        if (customerPhone != null && customerPhone.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 42,
-            child: OutlinedButton.icon(
-              onPressed: () => _callPhone(customerPhone),
-              icon: const Icon(Icons.call_rounded, size: 18),
-              label: const Text(
-                'Yolcuyu Ara',
-                style: TextStyle(fontWeight: FontWeight.w700),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            if (customerPhone != null && customerPhone.isNotEmpty)
+              Expanded(
+                child: SizedBox(
+                  height: 42,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _callPhone(customerPhone),
+                    icon: const Icon(Icons.call_rounded, size: 18),
+                    label: const Text(
+                      'Ara',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: BorderSide(color: Colors.white.withOpacity(0.55)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withOpacity(0.55)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            if (customerPhone != null && customerPhone.isNotEmpty)
+              const SizedBox(width: 10),
+            Expanded(
+              child: SizedBox(
+                height: 42,
+                child: OutlinedButton.icon(
+                  onPressed: () => showRideChatSheet(
+                    context,
+                    rideId: ride.id,
+                    peerName: _customerInitials(ride.customerName),
+                  ),
+                  icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                  label: const Text(
+                    'Mesaj',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: Colors.white.withOpacity(0.55)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
         if (isArriving && !ride.pickupCodeVerified) ...[
           const SizedBox(height: 12),
           Text(
@@ -414,23 +455,48 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
               ],
             ),
             const SizedBox(height: 10),
-            SizedBox(
-              height: 44,
-              child: OutlinedButton.icon(
-                onPressed: () => _cancelRide(context, ref, ride),
-                icon: const Icon(Icons.cancel_rounded, size: 18),
-                label: const Text(
-                  'Yolculuğu İptal Et',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFFCA5A5),
-                  side: const BorderSide(color: Color(0xFFB91C1C), width: 1.2),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 44,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _cancelRide(context, ref, ride),
+                      icon: const Icon(Icons.cancel_rounded, size: 18),
+                      label: const Text(
+                        'Yolculuğu İptal Et',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFFCA5A5),
+                        side: const BorderSide(color: Color(0xFFB91C1C), width: 1.2),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  height: 44,
+                  child: OutlinedButton.icon(
+                    onPressed: _callEmergency,
+                    icon: const Icon(Icons.emergency_rounded, size: 18),
+                    label: const Text(
+                      '112',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFCA5A5),
+                      side: const BorderSide(color: Color(0xFFB91C1C), width: 1.2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         );

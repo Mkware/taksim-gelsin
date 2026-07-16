@@ -8,11 +8,9 @@ import '../../screens/splash_screen.dart';
 import '../../screens/onboarding/onboarding_screen.dart';
 import '../../screens/auth/login_screen.dart';
 import '../../screens/auth/register_screen.dart';
-import '../../screens/auth/driver_register_screen.dart';
 import '../../screens/customer/customer_home_screen.dart';
 import '../../screens/customer/ride_history_screen.dart';
 import '../../screens/driver/driver_home_screen.dart';
-import '../../screens/driver/earnings_screen.dart';
 import '../../screens/driver/driver_wallet_screen.dart';
 import '../../screens/profile/profile_screen.dart';
 import '../../screens/profile/notification_settings_screen.dart';
@@ -89,10 +87,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/auth/register',
         builder: (context, state) => const RegisterScreen(),
       ),
-      GoRoute(
-        path: '/auth/register/driver',
-        builder: (context, state) => const DriverRegisterScreen(),
-      ),
 
       // KVKK / gizlilik / kullanım — giriş gerekmez
       GoRoute(
@@ -119,12 +113,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/driver',
         builder: (context, state) => const DriverHomeScreen(),
-      ),
-
-      // Sürücü kazanç ekranı
-      GoRoute(
-        path: '/driver/earnings',
-        builder: (context, state) => const EarningsScreen(),
       ),
 
       GoRoute(
