@@ -77,8 +77,10 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
   LatLng? _dropoffPosition;
   String? _pickupAddress;
   String? _dropoffAddress;
-  final Set<Marker> _markers = {};
-  final Set<Polyline> _polylines = {};
+  /// Marker/polyline setleri — GoogleMap bunları ValueListenable üzerinden
+  /// dinler; güncellemeleri tüm ekranı setState ile yeniden inşa etmez.
+  final ValueNotifier<Set<Marker>> _markers = ValueNotifier(<Marker>{});
+  final ValueNotifier<Set<Polyline>> _polylines = ValueNotifier(<Polyline>{});
   bool _locationLoading = true;
   final List<RouteInfo> _routeAlternatives = [];
   int _selectedRouteIndex = 0;
@@ -87,6 +89,12 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
   BitmapDescriptor? _dropoffIcon;
   /// Yolculuk başladı (socket) — süre özeti için
   DateTime? _tripStartedAt;
+
+  /// Rota önizlemesinde biniş/varış üzerinde gösterilen adres baloncukları.
+  BitmapDescriptor? _originLabelIcon;
+  BitmapDescriptor? _dropoffLabelIcon;
+  String? _originLabelTextCache;
+  String? _dropoffLabelTextCache;
 
   /// Rezervasyon alt paneli — varış + rota sonrası otomatik yükseltme
   final DraggableScrollableController _bookSheetController =
@@ -181,20 +189,40 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     _connectedSub?.cancel();
     dismissTopOverlayToast();
     _bookSheetController.dispose();
+    _markers.dispose();
+    _polylines.dispose();
     _mapController?.dispose();
     super.dispose();
   }
 
   static const double _bookSheetInitialSize = 0.32;
-  static const double _bookSheetExpandedSize = 0.65;
+  /// Varış seçildikten sonraki varsayılan (kompakt özet) yükseklik — başlangıç
+  /// değeri, gerçek cihazda gözle ayarlanabilir.
+  static const double _bookSheetCompactTripSize = 0.40;
+  /// Alternatif rota başına eklenen küçük yükseklik payı (3 seçenekte hafifçe daha ferah dursun).
+  static const double _bookSheetCompactTripPerAlternative = 0.015;
+  static const double _bookSheetCompactTripMax = 0.46;
+  /// Kullanıcı "Değiştir"e basıp biniş/varış düzenleme arayüzünü tekrar açtığında.
+  static const double _bookSheetEditingSize = 0.65;
 
   /// Draggable alt panelin yükseklik oranı — harita padding ve kamera ortalaması için.
   double _sheetExtent = _bookSheetInitialSize;
 
+  /// Varış seçiliyken biniş/varış düzenleme arayüzü açık mı (kompakt özetin tersi).
+  bool _tripEditorExpanded = false;
+
+  /// Kompakt özet hedefi — rota alternatifi sayısı arttıkça (rota kartları için) biraz büyür.
+  double get _bookSheetCompactTripTarget {
+    final extra = (_routeAlternatives.length - 1).clamp(0, 4);
+    final size = _bookSheetCompactTripSize + extra * _bookSheetCompactTripPerAlternative;
+    return size > _bookSheetCompactTripMax ? _bookSheetCompactTripMax : size;
+  }
+
   double _extentForMapBottomInset() {
     var e = _sheetExtent;
+    final floor = _tripEditorExpanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget;
     if (_routeAlternatives.isNotEmpty && _mapBottomInsetAtLeastExpanded) {
-      if (e < _bookSheetExpandedSize) e = _bookSheetExpandedSize;
+      if (e < floor) e = floor;
     }
     return e;
   }
@@ -226,8 +254,9 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!_bookSheetController.isAttached) return;
+      final target = _tripEditorExpanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget;
       _bookSheetController.animateTo(
-        _bookSheetExpandedSize,
+        target,
         duration: const Duration(milliseconds: 360),
         curve: Curves.easeOutCubic,
       );
@@ -240,6 +269,21 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
       if (!_bookSheetController.isAttached) return;
       _bookSheetController.animateTo(
         _bookSheetInitialSize,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  /// Biniş/varış düzenleme arayüzünü aç/kapat — kompakt özet ⇄ tam editör arasında geçiş.
+  void _setTripEditorExpanded(bool expanded) {
+    if (_tripEditorExpanded == expanded) return;
+    setState(() => _tripEditorExpanded = expanded);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_bookSheetController.isAttached) return;
+      _bookSheetController.animateTo(
+        expanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget,
         duration: const Duration(milliseconds: 280),
         curve: Curves.easeOutCubic,
       );
@@ -514,13 +558,17 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     final dropoffLat = ride.dropoffLat;
     final dropoffLng = ride.dropoffLng;
 
-    if (pickupLat != null && pickupLng != null) {
-      _pickupPosition = LatLng(pickupLat, pickupLng);
-      _pickupAddress = ride.pickupAddress;
-    }
+    setState(() {
+      if (pickupLat != null && pickupLng != null) {
+        _pickupPosition = LatLng(pickupLat, pickupLng);
+        _pickupAddress = ride.pickupAddress;
+      }
+      if (dropoffLat != null && dropoffLng != null) {
+        _dropoffPosition = LatLng(dropoffLat, dropoffLng);
+        _dropoffAddress = ride.dropoffAddress;
+      }
+    });
     if (dropoffLat != null && dropoffLng != null) {
-      _dropoffPosition = LatLng(dropoffLat, dropoffLng);
-      _dropoffAddress = ride.dropoffAddress;
       _fetchAndDrawRoute();
     } else {
       _applyMapPolylines();
@@ -579,10 +627,11 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
   }
 
   /// Marker'lar: kullanıcı konumu, varış, eşleşen sürücü (alım haritada pin değil).
+  /// setState çağırmaz — yalnızca haritayı saran ValueListenableBuilder'ı tetikler.
   void _rebuildMarkers() {
-    _markers.clear();
+    final next = <Marker>{};
     if (_userLocationIcon != null) {
-      _markers.add(Marker(
+      next.add(Marker(
         markerId: const MarkerId('user'),
         position: _currentPosition,
         icon: _userLocationIcon!,
@@ -590,15 +639,41 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
         zIndexInt: 3,
       ));
     }
-    if (_dropoffPosition != null) {
-      _markers.add(Marker(
-        markerId: const MarkerId('dropoff'),
-        position: _dropoffPosition!,
-        icon: _dropoffIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        anchor: const Offset(0.5, 0.5),
-        infoWindow: InfoWindow(title: 'Varış', snippet: _dropoffAddress ?? ''),
-        zIndexInt: 1,
+
+    // Rota önizlemesi (biniş → varış seçildikten sonra) — biniş noktasının
+    // üstünde konum adı, varışın üstünde adres baloncuğu.
+    final showRouteLabels = _routeAlternatives.isNotEmpty;
+    if (showRouteLabels && _originLabelIcon != null) {
+      next.add(Marker(
+        markerId: const MarkerId('origin_label'),
+        position: _pickupPosition ?? _currentPosition,
+        icon: _originLabelIcon!,
+        anchor: const Offset(0.5, 1.0),
+        zIndexInt: 5,
       ));
+    }
+
+    if (_dropoffPosition != null) {
+      if (showRouteLabels && _dropoffLabelIcon != null) {
+        next.add(Marker(
+          markerId: const MarkerId('dropoff_label'),
+          position: _dropoffPosition!,
+          icon: _dropoffLabelIcon!,
+          anchor: const Offset(0.5, 1.0),
+          infoWindow: InfoWindow(title: 'Varış', snippet: _dropoffAddress ?? ''),
+          zIndexInt: 5,
+        ));
+      } else {
+        // Baloncuk henüz üretilmediyse (async) basit pin'e düş.
+        next.add(Marker(
+          markerId: const MarkerId('dropoff'),
+          position: _dropoffPosition!,
+          icon: _dropoffIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          anchor: const Offset(0.5, 0.5),
+          infoWindow: InfoWindow(title: 'Varış', snippet: _dropoffAddress ?? ''),
+          zIndexInt: 1,
+        ));
+      }
     }
     final driver = ref.read(assignedDriverProvider);
     final activeRide = ref.read(activeRideProvider);
@@ -606,7 +681,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
 
     // Sürücü marker'ı sadece eşleşme olduğunda gösterilir
     if (hasActive && driver != null && (driver.lat != 0 || driver.lng != 0)) {
-      _markers.add(Marker(
+      next.add(Marker(
         markerId: const MarkerId('driver'),
         position: LatLng(driver.lat, driver.lng),
         icon: _driverCarIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
@@ -616,7 +691,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
       ));
     }
 
-    setState(() {});
+    _markers.value = next;
   }
 
   /// Ana rota + (kabul / geliyor) sürücü → biniş kesikli çizgi
@@ -626,17 +701,19 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     final driver = ref.read(assignedDriverProvider);
     final next = <Polyline>{};
 
-    if (_routeAlternatives.isNotEmpty) {
+    final hasRoute = _routeAlternatives.isNotEmpty;
+    if (hasRoute) {
       final pts = _routeAlternatives[_selectedRouteIndex].points;
       next.add(Polyline(
         polylineId: const PolylineId('route'),
         points: pts,
-        color: AppTheme.ink,
-        width: 3,
+        color: AppTheme.primaryColor,
+        width: 5,
         geodesic: true,
         startCap: Cap.roundCap,
         endCap: Cap.roundCap,
         jointType: JointType.round,
+        zIndex: 1,
       ));
     }
 
@@ -657,11 +734,55 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
       ));
     }
 
-    setState(() {
-      _polylines
-        ..clear()
-        ..addAll(next);
-    });
+    _polylines.value = next;
+
+    if (hasRoute) {
+      unawaited(_updateLabelBubbles());
+    } else {
+      _clearLabelBubbles();
+    }
+  }
+
+  /// Biniş/varış adres baloncuklarını (yalnızca metin değiştiyse) yeniden üretir.
+  Future<void> _updateLabelBubbles() async {
+    final originText = (_pickupAddress?.trim().isNotEmpty ?? false)
+        ? _pickupAddress!.trim()
+        : 'Mevcut Konumunuz';
+    final dropoffText = (_dropoffAddress?.trim().isNotEmpty ?? false)
+        ? _dropoffAddress!.trim()
+        : 'Varış Noktası';
+
+    var changed = false;
+    if (_originLabelTextCache != originText) {
+      _originLabelTextCache = originText;
+      final icon = await MapMarkerIcons.buildOriginLabelMarker(originText);
+      if (!mounted) return;
+      _originLabelIcon = icon;
+      changed = true;
+    }
+    if (_dropoffLabelTextCache != dropoffText) {
+      _dropoffLabelTextCache = dropoffText;
+      final icon = await MapMarkerIcons.buildDestinationLabelMarker(dropoffText);
+      if (!mounted) return;
+      _dropoffLabelIcon = icon;
+      changed = true;
+    }
+    if (changed) _rebuildMarkers();
+  }
+
+  /// Rota kaldırıldığında (varış temizlendiğinde) baloncukları da temizle.
+  void _clearLabelBubbles() {
+    if (_originLabelIcon == null &&
+        _dropoffLabelIcon == null &&
+        _originLabelTextCache == null &&
+        _dropoffLabelTextCache == null) {
+      return;
+    }
+    _originLabelIcon = null;
+    _dropoffLabelIcon = null;
+    _originLabelTextCache = null;
+    _dropoffLabelTextCache = null;
+    _rebuildMarkers();
   }
 
   /// Rota çizgisini Google Directions API ile çiz (alternatif rotalar dahil)
@@ -689,7 +810,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
         ..clear()
         ..addAll(routes);
       _selectedRouteIndex = 0;
-      _sheetExtent = _bookSheetExpandedSize;
+      _sheetExtent = _tripEditorExpanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget;
       _mapBottomInsetAtLeastExpanded = true;
     });
     _applyMapPolylines();
@@ -743,13 +864,16 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
   /// Haritayı temizle
   void _clearMap() {
     _routeBoundsFitGeneration++;
-    _dropoffPosition = null;
-    _dropoffAddress = null;
-    _routeAlternatives.clear();
-    _selectedRouteIndex = 0;
-    _tripStartedAt = null;
-    _sheetExtent = _bookSheetInitialSize;
-    _mapBottomInsetAtLeastExpanded = false;
+    setState(() {
+      _dropoffPosition = null;
+      _dropoffAddress = null;
+      _routeAlternatives.clear();
+      _selectedRouteIndex = 0;
+      _tripStartedAt = null;
+      _sheetExtent = _bookSheetInitialSize;
+      _mapBottomInsetAtLeastExpanded = false;
+      _tripEditorExpanded = false;
+    });
     _applyMapPolylines();
     if (_pickupPosition != null) _rebuildMarkers();
     _collapseBookSheet();
@@ -766,6 +890,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     setState(() {
       _dropoffPosition = LatLng(result.lat, result.lng);
       _dropoffAddress = result.name.isNotEmpty ? result.name : result.address;
+      _tripEditorExpanded = false;
     });
     _rebuildMarkers();
     await _fetchAndDrawRoute();
@@ -820,6 +945,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     setState(() {
       _pickupPosition = LatLng(result.lat, result.lng);
       _pickupAddress = result.name.isNotEmpty ? result.name : result.address;
+      _tripEditorExpanded = false;
     });
     _rebuildMarkers();
     if (_dropoffPosition != null) {
@@ -880,18 +1006,22 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     return Scaffold(
       body: Stack(
         children: [
-          // Google Maps
-          GoogleMap(
-            initialCameraPosition: CameraPosition(target: _currentPosition, zoom: AppConstants.defaultZoom),
-            onMapCreated: (controller) => _mapController = controller,
-            padding: _mapPaddingInsets(context, searchingBubble: isSearching),
-            markers: _markers,
-            polylines: _polylines,
-            myLocationEnabled: false,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-            compassEnabled: false,
+          // Google Maps — marker/polyline güncellemeleri yalnızca bu alt ağacı
+          // yeniden inşa eder (sürücü canlı konumu her 5 sn'de bir gelir).
+          AnimatedBuilder(
+            animation: Listenable.merge([_markers, _polylines]),
+            builder: (context, _) => GoogleMap(
+              initialCameraPosition: CameraPosition(target: _currentPosition, zoom: AppConstants.defaultZoom),
+              onMapCreated: (controller) => _mapController = controller,
+              padding: _mapPaddingInsets(context, searchingBubble: isSearching),
+              markers: _markers.value,
+              polylines: _polylines.value,
+              myLocationEnabled: false,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              compassEnabled: false,
+            ),
           ),
 
           // Alt — bottom sheet ile birleşen yumuşak beyaz geçiş (referans UI)
@@ -991,7 +1121,9 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
           Positioned.fill(
             child: NotificationListener<DraggableScrollableNotification>(
               onNotification: (DraggableScrollableNotification n) {
-                final e = n.extent;
+                // Sürükleme sırasında her kare değil, ~%2'lik adımlarla rebuild
+                // (harita padding'i için bu hassasiyet yeterli).
+                final e = (n.extent * 50).roundToDouble() / 50;
                 if (e != _sheetExtent) {
                   setState(() => _sheetExtent = e);
                 }
@@ -1021,9 +1153,10 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
                         minChildSize: 0.29,
                         maxChildSize: 0.88,
                         snap: true,
-                        snapSizes: const <double>[
+                        snapSizes: <double>[
                           _bookSheetInitialSize,
-                          _bookSheetExpandedSize,
+                          _bookSheetCompactTripTarget,
+                          _bookSheetEditingSize,
                           0.88,
                         ],
                         expand: false,
@@ -1047,6 +1180,9 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
                             onHistoryPlaceSelected: (detail) {
                               unawaited(_applyDropoffFromPlaceDetail(detail));
                             },
+                            tripEditorExpanded: _tripEditorExpanded,
+                            onExpandTripEditor: () => _setTripEditorExpanded(true),
+                            onCollapseTripEditor: () => _setTripEditorExpanded(false),
                           );
                         },
                       ),

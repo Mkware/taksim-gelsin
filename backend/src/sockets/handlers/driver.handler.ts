@@ -43,6 +43,11 @@ const DRIVER_LOCATION_KEY = 'driver:location:';
 const DRIVER_ACTIVE_RIDE_KEY = 'driver:active_ride:';
 // Aktif yolculuk cache TTL (sn) — stale kalırsa kısa sürede DB ile resenkronize olur
 const ACTIVE_RIDE_TTL_SEC = 600;
+// Yolculuğun müşteri ID cache'i — konum yayını için her tikte DB'ye gitmemek amacıyla.
+// Kısa TTL: yolculuk durumu DB'den en geç bu aralıkta yeniden doğrulanır
+// (tamamlanma/iptal zaten driver:active_ride anahtarını siler; bu yalnızca emniyet).
+const RIDE_CUSTOMER_KEY = 'ride:customer:';
+const RIDE_CUSTOMER_TTL_SEC = 60;
 // Hayalet sürücü önleme için kalp atışı (heartbeat) key prefix'i
 export const DRIVER_HEARTBEAT_KEY = 'driver:heartbeat:';
 // Heartbeat TTL (sn) — 3 dakika
@@ -275,18 +280,30 @@ export function registerDriverHandlers(socket: TypedSocket, io: TypedSocketServe
       // Müşteri için yayın
       let customerId: string | null = null;
       if (activeRideIdCached) {
-        // Cache hit — yalnızca customer_id için tek, hafif sorgu (durum kontrolü DB tek index scan)
-        const { data: ride } = await supabaseAdmin
-          .from('rides')
-          .select('customer_id, status')
-          .eq('id', activeRideIdCached)
-          .maybeSingle();
-
-        if (ride && ['accepted', 'arriving', 'in_progress'].includes(ride.status)) {
-          customerId = ride.customer_id;
+        // Önce Redis'teki müşteri cache'ine bak — sıcak yolda DB'ye hiç gitme
+        const cachedCustomer = await redis.get(`${RIDE_CUSTOMER_KEY}${activeRideIdCached}`);
+        if (cachedCustomer) {
+          customerId = cachedCustomer;
         } else {
-          // Cache bayat — temizle
-          await redis.del(`${DRIVER_ACTIVE_RIDE_KEY}${userId}`);
+          // Cache miss — DB'den doğrula (durum kontrolü dahil) ve kısa TTL ile cache'le
+          const { data: ride } = await supabaseAdmin
+            .from('rides')
+            .select('customer_id, status')
+            .eq('id', activeRideIdCached)
+            .maybeSingle();
+
+          if (ride && ['accepted', 'arriving', 'in_progress'].includes(ride.status)) {
+            customerId = ride.customer_id;
+            await redis.set(
+              `${RIDE_CUSTOMER_KEY}${activeRideIdCached}`,
+              ride.customer_id,
+              'EX',
+              RIDE_CUSTOMER_TTL_SEC
+            );
+          } else {
+            // Cache bayat — temizle
+            await redis.del(`${DRIVER_ACTIVE_RIDE_KEY}${userId}`);
+          }
         }
       }
 
@@ -300,12 +317,20 @@ export function registerDriverHandlers(socket: TypedSocket, io: TypedSocketServe
           .maybeSingle();
 
         if (activeRide?.id) {
-          await redis.set(
-            `${DRIVER_ACTIVE_RIDE_KEY}${userId}`,
-            activeRide.id,
-            'EX',
-            ACTIVE_RIDE_TTL_SEC
-          );
+          await Promise.all([
+            redis.set(
+              `${DRIVER_ACTIVE_RIDE_KEY}${userId}`,
+              activeRide.id,
+              'EX',
+              ACTIVE_RIDE_TTL_SEC
+            ),
+            redis.set(
+              `${RIDE_CUSTOMER_KEY}${activeRide.id}`,
+              activeRide.customer_id,
+              'EX',
+              RIDE_CUSTOMER_TTL_SEC
+            ),
+          ]);
           customerId = activeRide.customer_id;
         }
       }

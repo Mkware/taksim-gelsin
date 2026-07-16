@@ -8,6 +8,7 @@ import '../../core/widgets/top_overlay_toast.dart';
 import '../../models/ride_model.dart';
 import '../../models/driver_info_model.dart';
 import '../../providers/providers.dart';
+import '../../widgets/ride_chat_sheet.dart';
 import 'ride_searching_progress_card.dart';
 
 /// Aktif yolculuk — sürüklenebilir panel; özet üstte, güzergah genişletilebilir.
@@ -35,7 +36,20 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
     _arrivedPulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 950),
-    )..repeat(reverse: true);
+      value: 1,
+    );
+  }
+
+  /// Nabız animasyonu yalnızca "sürücü geldi" satırı görünürken çalışsın —
+  /// aksi halde sheet açık kaldığı sürece boşuna kare üretir (pil/CPU).
+  void _syncArrivedPulse(RideStatus status) {
+    final arriving = status == RideStatus.arriving;
+    if (arriving && !_arrivedPulseCtrl.isAnimating) {
+      _arrivedPulseCtrl.repeat(reverse: true);
+    } else if (!arriving && _arrivedPulseCtrl.isAnimating) {
+      _arrivedPulseCtrl.stop();
+      _arrivedPulseCtrl.value = 1;
+    }
   }
 
   @override
@@ -48,6 +62,13 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
     final normalized = phone.replaceAll(' ', '');
     final uri = Uri.parse('tel:$normalized');
     final ok = await launchUrl(uri);
+    if (!ok && mounted) {
+      showTopOverlayToast(context, 'Arama başlatılamadı.', AppTheme.errorColor);
+    }
+  }
+
+  Future<void> _callEmergency() async {
+    final ok = await launchUrl(Uri.parse('tel:112'));
     if (!ok && mounted) {
       showTopOverlayToast(context, 'Arama başlatılamadı.', AppTheme.errorColor);
     }
@@ -86,7 +107,15 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
   Widget build(BuildContext context) {
     // Her zaman provider — temp_ → gerçek id veya PIN güncellemesi kaçırılmasın.
     final ride = ref.watch(activeRideProvider) ?? widget.ride;
-    final driver = ref.watch(assignedDriverProvider);
+    // Konum (lat/lng) hariç alanları izle: sürücünün 5 sn'de bir gelen canlı
+    // konumu haritayı günceller ama bu sheet'i yeniden inşa etmesin.
+    ref.watch(assignedDriverProvider.select(
+      (d) => d == null
+          ? null
+          : (d.id, d.fullName, d.phone, d.rating, d.vehiclePlate, d.vehicleModel, d.vehicleColor),
+    ));
+    final driver = ref.read(assignedDriverProvider);
+    _syncArrivedPulse(ride.status);
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     const double edge = 16;
 
@@ -127,7 +156,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
                       child: const RideSearchingProgressCard(),
                     ),
                   if (driver != null && ride.status != RideStatus.searching)
-                    _driverHeaderCard(driver, ride.status),
+                    _driverHeaderCard(driver, ride.status, ride.id),
                   if (_waitingForPickupCode(ride))
                     _sectionCard(
                       child: Row(
@@ -182,7 +211,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
     );
   }
 
-  Widget _driverHeaderCard(DriverInfoModel driver, RideStatus status) {
+  Widget _driverHeaderCard(DriverInfoModel driver, RideStatus status, String rideId) {
     final compactName = _shortNameWithSurnameInitial(driver.fullName);
     return _sectionCard(
       child: Column(
@@ -230,6 +259,15 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
                 style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700),
               ),
               const SizedBox(width: 4),
+              IconButton(
+                onPressed: () => showRideChatSheet(
+                  context,
+                  rideId: rideId,
+                  peerName: compactName,
+                ),
+                icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                tooltip: 'Sürücüye Mesaj',
+              ),
               IconButton(
                 onPressed: driver.phone.trim().isEmpty
                     ? null
@@ -547,6 +585,20 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
           title: Text('Canlı Destek', style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600)),
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => _openWhatsAppSupport(),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.emergency_rounded, color: AppTheme.errorColor),
+          title: Text(
+            'Acil Durum (112)',
+            style: GoogleFonts.inter(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.errorColor,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.errorColor),
+          onTap: () => _callEmergency(),
         ),
         if (showCancel)
           ListTile(

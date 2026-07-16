@@ -70,6 +70,8 @@ class SocketService {
       StreamController<Map<String, dynamic>>.broadcast();
   final _rideCompleteFailedController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _newMessageController = StreamController<Map<String, dynamic>>.broadcast();
+  final _messageHistoryController = StreamController<Map<String, dynamic>>.broadcast();
 
   // Public stream'ler
   Stream<Map<String, dynamic>> get onRideAccepted => _rideAcceptedController.stream;
@@ -104,6 +106,16 @@ class SocketService {
   /// Yolculuk tamamlama başarısız (yetki/fiyat)
   Stream<Map<String, dynamic>> get onRideCompleteFailed =>
       _rideCompleteFailedController.stream;
+  /// Yeni sohbet mesajı (karşı taraftan veya kendi gönderdiğimiz — ride room'a yayın)
+  Stream<Map<String, dynamic>> get onNewMessage => _newMessageController.stream;
+  /// Chat ekranı açılınca / reconnect sonrası sohbet geçmişi
+  Stream<Map<String, dynamic>> get onMessageHistory => _messageHistoryController.stream;
+
+  /// Sunucu event loglaması — yalnızca debug derlemede çalışır; release'te
+  /// payload'ın string'e serileştirilme maliyetini tamamen atlar.
+  void _logEvent(String event, Object? data) {
+    if (kDebugMode) debugPrint('📥 $event: $data');
+  }
 
   bool get isConnected => _isConnected;
 
@@ -191,7 +203,7 @@ class SocketService {
 
     // Başka cihazdan giriş veya sunucu çıkışı — istemci oturumu kapatmalı
     _socket!.on('auth:session_ended', (data) {
-      debugPrint('📥 auth:session_ended: $data');
+      _logEvent('auth:session_ended', data);
       final until = _ignoreSessionEndedBefore;
       if (until != null && DateTime.now().isBefore(until)) {
         debugPrint('auth:session_ended yok sayıldı (yeni bağlantı sonrası koruma)');
@@ -222,7 +234,7 @@ class SocketService {
 
     // Sürücü yolculuğu kabul etti
     _socket!.on('ride:accepted', (data) {
-      debugPrint('📥 ride:accepted: $data');
+      _logEvent('ride:accepted', data);
       _rideAcceptedController.add(Map<String, dynamic>.from(data as Map));
     });
 
@@ -233,26 +245,26 @@ class SocketService {
 
     // Yolculuk durum güncellemesi
     _socket!.on('ride:status_update', (data) {
-      debugPrint('📥 ride:status_update: $data');
+      _logEvent('ride:status_update', data);
       _rideStatusController.add(Map<String, dynamic>.from(data as Map));
     });
 
     // Yeni yolculuk isteği (sürücüye)
     _socket!.on('ride:new_request', (data) {
-      debugPrint('📥 ride:new_request: $data');
+      _logEvent('ride:new_request', data);
       _newRideRequestController.add(Map<String, dynamic>.from(data as Map));
     });
 
     // Sürücü bulunamadı
     _socket!.on('ride:no_driver_found', (data) {
-      debugPrint('📥 ride:no_driver_found: $data');
+      _logEvent('ride:no_driver_found', data);
       final rideId = (data as Map)['rideId'] as String;
       _noDriverFoundController.add(rideId);
     });
 
     // Sürücü biniş noktasına vardı
     _socket!.on('ride:driver_arrived', (data) {
-      debugPrint('📥 ride:driver_arrived: $data');
+      _logEvent('ride:driver_arrived', data);
       final map = data is Map
           ? Map<String, dynamic>.from(data)
           : <String, dynamic>{'rideId': ''};
@@ -261,31 +273,31 @@ class SocketService {
 
     // Yolculuk başladı
     _socket!.on('ride:started', (data) {
-      debugPrint('📥 ride:started: $data');
+      _logEvent('ride:started', data);
       final rideId = (data as Map)['rideId'] as String;
       _rideStartedController.add(rideId);
     });
 
     // Yolculuk tamamlandı
     _socket!.on('ride:completed', (data) {
-      debugPrint('📥 ride:completed: $data');
+      _logEvent('ride:completed', data);
       _rideCompletedController.add(Map<String, dynamic>.from(data as Map));
     });
 
     // Yolculuk iptal edildi
     _socket!.on('ride:cancelled', (data) {
-      debugPrint('📥 ride:cancelled: $data');
+      _logEvent('ride:cancelled', data);
       _rideCancelledController.add(Map<String, dynamic>.from(data as Map));
     });
 
     // Sunucu gerçek yolculuk id (searching — müşteri temp id'yi günceller)
     _socket!.on('ride:searching', (data) {
-      debugPrint('📥 ride:searching: $data');
+      _logEvent('ride:searching', data);
       _rideSearchingController.add(Map<String, dynamic>.from(data as Map));
     });
 
     _socket!.on('ride:matching_progress', (data) {
-      debugPrint('📥 ride:matching_progress: $data');
+      _logEvent('ride:matching_progress', data);
       if (data is Map) {
         _rideMatchingProgressController.add(Map<String, dynamic>.from(data));
       }
@@ -293,62 +305,62 @@ class SocketService {
 
     // Müşteri ararken iptal — sürücüdeki bekleyen istek kalktı
     _socket!.on('ride:request_cancelled', (data) {
-      debugPrint('📥 ride:request_cancelled: $data');
+      _logEvent('ride:request_cancelled', data);
       _rideRequestCancelledController.add(Map<String, dynamic>.from(data as Map));
     });
 
     // Bağlantı / reconnect sonrası aktif yolculuk snapshot'ı
     _socket!.on('ride:snapshot', (data) {
-      debugPrint('📥 ride:snapshot: $data');
+      _logEvent('ride:snapshot', data);
       if (data is Map) {
         _rideSnapshotController.add(Map<String, dynamic>.from(data));
       }
     });
 
     _socket!.on('ride:pickup_code_result', (data) {
-      debugPrint('📥 ride:pickup_code_result: $data');
+      _logEvent('ride:pickup_code_result', data);
       if (data is Map) {
         _pickupCodeResultController.add(Map<String, dynamic>.from(data));
       }
     });
 
     _socket!.on('ride:start_rejected', (data) {
-      debugPrint('📥 ride:start_rejected: $data');
+      _logEvent('ride:start_rejected', data);
       if (data is Map) {
         _rideStartRejectedController.add(Map<String, dynamic>.from(data));
       }
     });
 
     _socket!.on('ride:reveal_location', (data) {
-      debugPrint('📥 ride:reveal_location: $data');
+      _logEvent('ride:reveal_location', data);
       if (data is Map) {
         _rideRevealLocationController.add(Map<String, dynamic>.from(data));
       }
     });
 
     _socket!.on('ride:accept_failed', (data) {
-      debugPrint('📥 ride:accept_failed: $data');
+      _logEvent('ride:accept_failed', data);
       if (data is Map) {
         _rideAcceptFailedController.add(Map<String, dynamic>.from(data));
       }
     });
 
     _socket!.on('driver:online_blocked', (data) {
-      debugPrint('📥 driver:online_blocked: $data');
+      _logEvent('driver:online_blocked', data);
       if (data is Map) {
         _driverOnlineBlockedController.add(Map<String, dynamic>.from(data));
       }
     });
 
     _socket!.on('driver:forced_offline', (data) {
-      debugPrint('📥 driver:forced_offline: $data');
+      _logEvent('driver:forced_offline', data);
       if (data is Map) {
         _driverForcedOfflineController.add(Map<String, dynamic>.from(data));
       }
     });
 
     _socket!.on('driver:online_confirmed', (data) {
-      debugPrint('📥 driver:online_confirmed: $data');
+      _logEvent('driver:online_confirmed', data);
       if (data is Map) {
         _driverOnlineConfirmedController.add(Map<String, dynamic>.from(data));
       } else {
@@ -357,12 +369,27 @@ class SocketService {
     });
 
     _socket!.on('ride:complete_failed', (data) {
-      debugPrint('📥 ride:complete_failed: $data');
+      _logEvent('ride:complete_failed', data);
       if (data is Map) {
         _rideCompleteFailedController.add(Map<String, dynamic>.from(data));
       }
     });
 
+    // Yeni sohbet mesajı
+    _socket!.on('message:new', (data) {
+      _logEvent('message:new', data);
+      if (data is Map) {
+        _newMessageController.add(Map<String, dynamic>.from(data));
+      }
+    });
+
+    // Sohbet geçmişi
+    _socket!.on('message:history', (data) {
+      _logEvent('message:history', data);
+      if (data is Map) {
+        _messageHistoryController.add(Map<String, dynamic>.from(data));
+      }
+    });
   }
 
   Future<String?> _resolveJwtForHandshake() async {
@@ -534,6 +561,16 @@ class SocketService {
     _emit('driver:location:update', {'lat': lat, 'lng': lng, 'bearing': bearing});
   }
 
+  /// Her iki taraf: Aktif yolculuğa sohbet mesajı gönder
+  void sendMessage(String rideId, String text) {
+    _emit('message:send', {'rideId': rideId, 'text': text});
+  }
+
+  /// Her iki taraf: Chat ekranı açılınca sohbet geçmişini iste
+  void getMessageHistory(String rideId) {
+    _emit('message:get_history', {'rideId': rideId});
+  }
+
   // ============================================================
   // YARDIMCI METODLAR
   // ============================================================
@@ -675,5 +712,7 @@ class SocketService {
     _driverForcedOfflineController.close();
     _driverOnlineConfirmedController.close();
     _rideCompleteFailedController.close();
+    _newMessageController.close();
+    _messageHistoryController.close();
   }
 }

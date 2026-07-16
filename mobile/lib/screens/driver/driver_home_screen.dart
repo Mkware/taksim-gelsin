@@ -75,9 +75,10 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
   /// Online olduğunda butonun etrafında yavaşça atan halka animasyonu
   late final AnimationController _ringCtrl;
 
-  // Harita rota/marker durumu
-  final Set<Marker> _markers = {};
-  final Set<Polyline> _polylines = {};
+  // Harita rota/marker durumu — GoogleMap bunları ValueListenable ile dinler;
+  // her GPS tikinde tüm ekranı setState ile yeniden inşa etmemek için.
+  final ValueNotifier<Set<Marker>> _markers = ValueNotifier(<Marker>{});
+  final ValueNotifier<Set<Polyline>> _polylines = ValueNotifier(<Polyline>{});
   BitmapDescriptor? _pickupIcon;
   BitmapDescriptor? _dropoffIcon;
   late final DirectionsService _directionsService;
@@ -133,12 +134,12 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
     _directionsService = DirectionsService(AppConstants.googleMapsApiKey);
     MapMarkerIcons.loadUserLocationMarker().then((icon) {
       if (!mounted) return;
-      setState(() => _pickupIcon = icon);
+      _pickupIcon = icon;
       _rebuildMarkers();
     });
     MapMarkerIcons.loadDropoffMarker().then((icon) {
       if (!mounted) return;
-      setState(() => _dropoffIcon = icon);
+      _dropoffIcon = icon;
       _rebuildMarkers();
     });
     _getCurrentLocation();
@@ -171,7 +172,10 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
     _toastTimer?.cancel();
     _toastEntry?.remove();
     _ringCtrl.dispose();
+    _markers.dispose();
+    _polylines.dispose();
     _mapController?.dispose();
+    DriverRideRequestFcm.dispose();
     super.dispose();
   }
 
@@ -650,34 +654,51 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
     }
   }
 
+  /// Aktif akışın profili: true = yolculukta (yüksek hassasiyet), false = boşta.
+  /// null → akış kapalı. Profil değişmeden tekrar başlatma yapılmaz.
+  bool? _locationProfileHighAccuracy;
+
+  /// Aktif yolculuk varken hassas takip gerekir; boşta (müşteri beklerken)
+  /// dengeli mod pil tüketimini ciddi azaltır — eşleştirme için ~100m yeterli.
+  bool get _needsHighAccuracyLocation {
+    final ride = ref.read(activeRideProvider);
+    return ride != null && ride.isActive;
+  }
+
   void _startLocationUpdates() {
+    final high = _needsHighAccuracyLocation;
+    if (_positionStreamSub != null && _locationProfileHighAccuracy == high) {
+      return; // akış zaten doğru profilde çalışıyor
+    }
     _positionStreamSub?.cancel();
+    _locationProfileHighAccuracy = high;
+
+    final accuracy = high ? LocationAccuracy.high : LocationAccuracy.medium;
+    final distanceFilter = high ? 10 : 25;
 
     late LocationSettings locationSettings;
     if (defaultTargetPlatform == TargetPlatform.android) {
       locationSettings = AndroidSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-        forceLocationManager: true,
+        accuracy: accuracy,
+        distanceFilter: distanceFilter,
         intervalDuration: Duration(milliseconds: AppConstants.locationUpdateIntervalMs),
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationText: "Arka planda konum takip ediliyor",
           notificationTitle: "Taksim Gelsin",
-          enableWakeLock: true,
         ),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       locationSettings = AppleSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy: accuracy,
         activityType: ActivityType.automotiveNavigation,
-        distanceFilter: 10,
-        pauseLocationUpdatesAutomatically: false,
+        distanceFilter: distanceFilter,
+        pauseLocationUpdatesAutomatically: !high,
         showBackgroundLocationIndicator: true,
       );
     } else {
-      locationSettings = const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+      locationSettings = LocationSettings(
+        accuracy: accuracy,
+        distanceFilter: distanceFilter,
       );
     }
 
@@ -704,6 +725,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
   void _stopLocationUpdates() {
     _positionStreamSub?.cancel();
     _positionStreamSub = null;
+    _locationProfileHighAccuracy = null;
   }
 
   Future<void> _sendInitialLocation() async {
@@ -712,9 +734,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
         desiredAccuracy: LocationAccuracy.high,
       );
       if (!mounted) return;
-      setState(() {
-        _currentPosition = LatLng(position.latitude, position.longitude);
-      });
+      _currentPosition = LatLng(position.latitude, position.longitude);
       _rebuildMarkers();
       final socket = ref.read(socketServiceProvider);
       socket.updateLocation(
@@ -829,7 +849,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
 
     final key = '${toPickup ? 'p' : 'd'}:${target.latitude.toStringAsFixed(5)}'
         ',${target.longitude.toStringAsFixed(5)}';
-    if (_lastRouteKey == key && _polylines.isNotEmpty) {
+    if (_lastRouteKey == key && _polylines.value.isNotEmpty) {
       _rebuildMarkers();
       return;
     }
@@ -838,20 +858,18 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
     final route = await _directionsService.getDirections(origin, target);
     if (!mounted) return;
 
-    setState(() {
-      _polylines
-        ..clear()
-        ..add(Polyline(
-          polylineId: const PolylineId('driver_route'),
-          points: route?.points ?? [origin, target!],
-          color: toPickup ? AppTheme.accentColor : AppTheme.primaryColor,
-          width: 6,
-          geodesic: true,
-          startCap: Cap.roundCap,
-          endCap: Cap.roundCap,
-          jointType: JointType.round,
-        ));
-    });
+    _polylines.value = <Polyline>{
+      Polyline(
+        polylineId: const PolylineId('driver_route'),
+        points: route?.points ?? [origin, target],
+        color: toPickup ? AppTheme.accentColor : AppTheme.primaryColor,
+        width: 6,
+        geodesic: true,
+        startCap: Cap.roundCap,
+        endCap: Cap.roundCap,
+        jointType: JointType.round,
+      ),
+    };
     _rebuildMarkers();
     _fitRouteBounds(origin, target);
   }
@@ -909,20 +927,13 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
       infoWindow: const InfoWindow(title: 'Konumunuz'),
     ));
 
-    setState(() {
-      _markers
-        ..clear()
-        ..addAll(next);
-    });
+    _markers.value = next;
   }
 
   void _clearRoute() {
     _lastRouteKey = null;
-    if (_polylines.isEmpty && _markers.isEmpty) return;
-    setState(() {
-      _polylines.clear();
-      _markers.clear();
-    });
+    if (_polylines.value.isEmpty && _markers.value.isEmpty) return;
+    _polylines.value = const <Polyline>{};
     // Rota silindikten sonra en azından sürücü konumu marker'ı kalsın.
     _rebuildMarkers();
   }
@@ -1029,8 +1040,11 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
       unawaited(_presentIncomingRideRequest(next, fromFcm: true));
     });
 
-    // Aktif yolculuk durumu değiştikçe rota/marker'ı yeniden çiz
+    // Aktif yolculuk durumu değiştikçe rota/marker'ı yeniden çiz.
+    // Konum akışı profili de burada tazelenir: yolculuk başlarken yüksek
+    // hassasiyete, biterken dengeli moda geçer (profil aynıysa no-op).
     ref.listen<RideModel?>(activeRideProvider, (prev, next) {
+      if (_positionStreamSub != null) _startLocationUpdates();
       if (next == null || !next.isActive) {
         _clearRoute();
         return;
@@ -1045,8 +1059,11 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
     return Scaffold(
       body: Stack(
         children: [
-          // Harita
-          GoogleMap(
+          // Harita — marker/polyline güncellemeleri (her GPS tiki) yalnızca bu
+          // alt ağacı yeniden inşa eder, ekranın kalanına dokunmaz.
+          AnimatedBuilder(
+            animation: Listenable.merge([_markers, _polylines]),
+            builder: (context, _) => GoogleMap(
             initialCameraPosition:
                 CameraPosition(target: _currentPosition, zoom: 14.5),
             onMapCreated: (controller) {
@@ -1054,14 +1071,15 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
               controller.setMapStyle(_driverMapNightStyle);
               _refreshActiveRideRoute();
             },
-            markers: _markers,
-            polylines: _polylines,
+            markers: _markers.value,
+            polylines: _polylines.value,
             // true iken Google Maps SDK ayrıca konum izni tetikleyebilir (çıkış/giriş sonrası tekrar soru).
             myLocationEnabled: false,
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
             mapToolbarEnabled: false,
             compassEnabled: false,
+            ),
           ),
 
           // Hafif üst gradient — durum çubuğunun okunurluğu için
@@ -1149,9 +1167,13 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
       children: [
         _buildTopBarRow(user, isOnline),
         const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: OnlineScanBar(active: isOnline, color: AppTheme.success),
+        // RepaintBoundary: sürekli akan animasyon haritanın üstünde tüm
+        // katmanı değil yalnızca kendi alanını boyasın.
+        RepaintBoundary(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: OnlineScanBar(active: isOnline, color: AppTheme.success),
+          ),
         ),
       ],
     );
@@ -1231,10 +1253,12 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  BreathingDot(
-                    color: isOnline ? _statusOnlineDark : _statusOfflineGray,
-                    size: 9,
-                    pulse: isOnline,
+                  RepaintBoundary(
+                    child: BreathingDot(
+                      color: isOnline ? _statusOnlineDark : _statusOfflineGray,
+                      size: 9,
+                      pulse: isOnline,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Flexible(
@@ -1366,7 +1390,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
                     ),
                     child: Icon(
                       isOnline
-                          ? Icons.local_taxi_rounded
+                          ? Icons.wifi_rounded
                           : Icons.nightlight_round,
                       size: 20,
                       color: isOnline ? AppTheme.success : _textOnDarkMuted,
@@ -1483,30 +1507,33 @@ class _OnlineToggleButton extends StatelessWidget {
               ),
             ),
 
-            // Dönen halka (sadece online)
+            // Dönen halka (sadece online) — RepaintBoundary: her animasyon
+            // karesi yalnızca halkayı boyar, buton katmanını değil.
             if (isOnline)
-              AnimatedBuilder(
-                animation: ringController,
-                builder: (context, _) {
-                  final t = ringController.value;
-                  final scale = 1 + t * 0.06;
-                  final opacity = (1 - t) * 0.45;
-                  return Transform.scale(
-                    scale: scale,
-                    child: Container(
-                      height: 52,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusXl),
-                        border: Border.all(
-                          color: AppTheme.success.withOpacity(opacity),
-                          width: 2.5,
+              RepaintBoundary(
+                child: AnimatedBuilder(
+                  animation: ringController,
+                  builder: (context, _) {
+                    final t = ringController.value;
+                    final scale = 1 + t * 0.06;
+                    final opacity = (1 - t) * 0.45;
+                    return Transform.scale(
+                      scale: scale,
+                      child: Container(
+                        height: 52,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          borderRadius:
+                              BorderRadius.circular(AppTheme.radiusXl),
+                          border: Border.all(
+                            color: AppTheme.success.withOpacity(opacity),
+                            width: 2.5,
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
 
             // Etiket veya yükleme
