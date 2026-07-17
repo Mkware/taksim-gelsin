@@ -211,14 +211,22 @@ export async function registerDriver(input: DriverRegisterInput): Promise<Driver
   }
 
   // Sürücü detaylarını kaydet (drivers tablosu, users.id ile ilişkili)
-  const { error: driverError } = await supabaseAdmin
-    .from('drivers')
-    .insert({
-      id: user.id,
-      vehicle_plate,
-      vehicle_model,
-      vehicle_color,
-    });
+  // driver_code: favori sürücü çağırma özelliğinin lookup anahtarı (telefon numarası DEĞİL).
+  // Benzersizliği DB unique constraint garanti eder; çakışma çıkarsa birkaç kez yeniden denenir.
+  let driverError: { code?: string; message?: string } | null = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { error } = await supabaseAdmin
+      .from('drivers')
+      .insert({
+        id: user.id,
+        vehicle_plate,
+        vehicle_model,
+        vehicle_color,
+        driver_code: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
+      });
+    driverError = error;
+    if (!error || error.code !== '23505') break;
+  }
 
   if (driverError) {
     // Sürücü kaydı başarısızsa kullanıcıyı da sil (tutarlılık)

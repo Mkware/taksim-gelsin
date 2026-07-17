@@ -36,6 +36,8 @@ export interface RideRequestPayload {
   dropoffAddress: string;
   estimatedPrice: number;
   distanceKm: number;
+  /** Favori sürücü çağırma — verilmişse eşleştirme bu sürücüyle başlar (uygun değilse/reddederse normal aramaya düşer). */
+  preferredDriverId?: string;
 }
 
 // Sürücü yolculuk kabul

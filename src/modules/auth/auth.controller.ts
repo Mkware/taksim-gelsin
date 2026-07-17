@@ -167,7 +167,7 @@ export async function getMe(req: Request, res: Response, next: NextFunction): Pr
     if (user.role === 'driver') {
       const { data: driver } = await supabaseAdmin
         .from('drivers')
-        .select('vehicle_plate, vehicle_model, vehicle_color, is_online, is_available, total_rides, balance')
+        .select('vehicle_plate, vehicle_model, vehicle_color, is_online, is_available, total_rides, balance, driver_code')
         .eq('id', user.id)
         .single();
 
