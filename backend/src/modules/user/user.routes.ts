@@ -123,44 +123,60 @@ router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
 
-    const { data, error } = await supabaseAdmin
+    // customer_favorite_drivers -> drivers embed'i PostgREST'te belirsizdi (drivers,
+    // driver_locations_history gibi başka drivers.id FK'leri de var, PGRST201).
+    // Bu yüzden iki ayrı sorguya bölünüyor — driver_id listesi, sonra drivers'tan tek seferde.
+    const { data: favRows, error: favError } = await supabaseAdmin
       .from('customer_favorite_drivers')
-      .select(`
-        driver_id,
-        drivers:driver_id (
-          id, vehicle_plate, vehicle_model, vehicle_color, is_online, current_location,
-          users:id (full_name, rating, rating_count)
-        )
-      `)
+      .select('driver_id')
       .eq('customer_id', userId)
       .order('created_at', { ascending: true });
 
-    if (error) {
-      logger.error('[FavoriteDrivers] GET select hata:', error);
+    if (favError) {
+      logger.error('[FavoriteDrivers] GET favorite select hata:', favError);
       res.status(500).json({ success: false, error: 'Favori sürücüler alınamadı.' });
       return;
     }
 
-    const rows = (data ?? []) as unknown as Array<{
-      driver_id: string;
-      drivers: {
-        id: string;
-        vehicle_plate: string;
-        vehicle_model: string;
-        vehicle_color: string;
-        is_online: boolean;
-        current_location: unknown;
-        users: { full_name: string; rating: number; rating_count: number } | null;
-      } | null;
-    }>;
+    const orderedDriverIds = (favRows ?? []).map((r) => r.driver_id as string);
+    if (orderedDriverIds.length === 0) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+
+    const { data: driverRows, error: driverError } = await supabaseAdmin
+      .from('drivers')
+      .select(`
+        id, vehicle_plate, vehicle_model, vehicle_color, is_online, current_location,
+        users:id (full_name, rating, rating_count)
+      `)
+      .in('id', orderedDriverIds);
+
+    if (driverError) {
+      logger.error('[FavoriteDrivers] GET drivers select hata:', driverError);
+      res.status(500).json({ success: false, error: 'Favori sürücüler alınamadı.' });
+      return;
+    }
+
+    type DriverRow = {
+      id: string;
+      vehicle_plate: string;
+      vehicle_model: string;
+      vehicle_color: string;
+      is_online: boolean;
+      current_location: unknown;
+      users: { full_name: string; rating: number; rating_count: number } | null;
+    };
+    const driverById = new Map(
+      ((driverRows ?? []) as unknown as DriverRow[]).map((d) => [d.id, d]),
+    );
 
     const qLat = Number(req.query.lat);
     const qLng = Number(req.query.lng);
     const haveOrigin = Number.isFinite(qLat) && Number.isFinite(qLng);
 
-    const onlineWithLocation = rows
-      .map((r) => r.drivers)
-      .filter((d): d is NonNullable<typeof d> => !!d && d.is_online)
+    const onlineWithLocation = [...driverById.values()]
+      .filter((d) => d.is_online)
       .map((d) => ({ id: d.id, point: decodeEwkbPoint(d.current_location) }))
       .filter((d): d is { id: string; point: { lat: number; lng: number } } => !!d.point);
 
@@ -181,21 +197,19 @@ router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
       }
     }
 
-    const result = rows
-      .filter((r) => !!r.drivers)
-      .map((r) => {
-        const d = r.drivers!;
-        return {
-          driver_id: d.id,
-          full_name: d.users?.full_name ?? '',
-          rating: d.users?.rating ?? 5,
-          vehicle_plate: d.vehicle_plate,
-          vehicle_model: d.vehicle_model,
-          vehicle_color: d.vehicle_color,
-          is_online: d.is_online,
-          eta_seconds: etaByDriverId.get(d.id) ?? null,
-        };
-      });
+    const result = orderedDriverIds
+      .map((id) => driverById.get(id))
+      .filter((d): d is DriverRow => !!d)
+      .map((d) => ({
+        driver_id: d.id,
+        full_name: d.users?.full_name ?? '',
+        rating: d.users?.rating ?? 5,
+        vehicle_plate: d.vehicle_plate,
+        vehicle_model: d.vehicle_model,
+        vehicle_color: d.vehicle_color,
+        is_online: d.is_online,
+        eta_seconds: etaByDriverId.get(d.id) ?? null,
+      }));
 
     res.json({ success: true, data: result });
   } catch (e) {
