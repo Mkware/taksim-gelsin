@@ -27,7 +27,7 @@ router.get('/me', roleMiddleware(['driver']), async (req: Request, res: Response
       .select(`
         id, vehicle_plate, vehicle_model, vehicle_color, balance, driver_code,
         is_online, is_available, total_rides, created_at,
-        users:id (full_name, phone, avatar_url, rating, rating_count)
+        users:users!drivers_id_fkey (full_name, phone, avatar_url, rating, rating_count)
       `)
       .eq('id', userId)
       .single();
@@ -93,7 +93,7 @@ router.get('/by-code/:code', roleMiddleware(['customer']), async (req: Request, 
       .from('drivers')
       .select(`
         id, vehicle_plate, vehicle_model, vehicle_color, is_online,
-        users:id (full_name, rating, rating_count)
+        users:users!drivers_id_fkey (full_name, rating, rating_count)
       `)
       .eq('driver_code', code)
       .single();

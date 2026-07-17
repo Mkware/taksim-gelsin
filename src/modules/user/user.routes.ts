@@ -148,7 +148,7 @@ router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
       .from('drivers')
       .select(`
         id, vehicle_plate, vehicle_model, vehicle_color, is_online, current_location,
-        users:id (full_name, rating, rating_count)
+        users:users!drivers_id_fkey (full_name, rating, rating_count)
       `)
       .in('id', orderedDriverIds);
 
