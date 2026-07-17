@@ -69,7 +69,8 @@ export function registerRideHandlers(socket: TypedSocket, io: TypedSocketServer)
     socket.on('ride:request', async (payload: RideRequestPayload) => {
       try {
         // Temel input doğrulama — bozuk payload erkenden reddedilsin
-        const { pickup, dropoff, pickupAddress, dropoffAddress, distanceKm } = payload ?? ({} as RideRequestPayload);
+        const { pickup, dropoff, pickupAddress, dropoffAddress, distanceKm, preferredDriverId } =
+          payload ?? ({} as RideRequestPayload);
         const validPoint = (p: { lat?: number; lng?: number } | undefined): boolean =>
           !!p &&
           Number.isFinite(Number(p.lat)) &&
@@ -104,7 +105,12 @@ export function registerRideHandlers(socket: TypedSocket, io: TypedSocketServer)
         io.to(`customer:${userId}`).emit('ride:searching', { rideId: ride.id });
 
         // Eşleştirme servisini başlat — yakın sürücüleri bul ve istek gönder
-        await startSmartMatching(ride.id, pickup.lat, pickup.lng, userId);
+        // (preferredDriverId verilmişse önce o sürücüye gider — favori sürücü çağırma)
+        const validPreferredDriverId =
+          typeof preferredDriverId === 'string' && preferredDriverId.trim().length > 0
+            ? preferredDriverId.trim()
+            : undefined;
+        await startSmartMatching(ride.id, pickup.lat, pickup.lng, userId, validPreferredDriverId);
 
         logger.info(`📋 Yolculuk oluşturuldu, eşleştirme başlatıldı: ${ride.id}`);
       } catch (error) {

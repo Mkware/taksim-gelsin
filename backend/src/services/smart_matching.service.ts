@@ -674,6 +674,28 @@ async function searchAndEnqueueDrivers(
 }
 
 /**
+ * Favori sürücü çağırma: normal yakınlık aramasını (find_nearby_drivers + Distance Matrix)
+ * atlar, doğrudan tek sürücüyü aynı `filterCandidatesForRide` uygunluk kontrolünden geçirip
+ * kuyruğa yazar. Uygun değilse (çevrimdışı/meşgul/bakiye yetersiz/hayalet online) 0 döner —
+ * çağıran taraf (`startSmartMatching`) normal aramaya düşer.
+ */
+async function enqueuePreferredDriver(rideId: string, driverId: string): Promise<number> {
+  const [eligible] = await filterCandidatesForRide([{ id: driverId }], rideId);
+  if (!eligible) {
+    logger.info(`[SmartMatching] Favori sürücü ${driverId} uygun değil ride=${rideId} — normal aramaya düşülüyor`);
+    return 0;
+  }
+
+  const qKey = REDIS_KEYS.matchingQueue(rideId);
+  await redis.rpush(qKey, driverId);
+  await redis.expire(qKey, QUEUE_TTL_S);
+  await redis.incrby(REDIS_KEYS.matchingQueuedTotal(rideId), 1);
+  await redis.expire(REDIS_KEYS.matchingQueuedTotal(rideId), QUEUE_TTL_S);
+
+  return 1;
+}
+
+/**
  * İkinci dalga araması: kuyruk tükenip hiç açık teklif kalmadığında, ride başına yalnızca
  * BİR KEZ çalışacak şekilde `retrySearchUsed` bayrağıyla korunur (SET NX — eşzamanlı
  * çağrılar birbirini tekrar tetiklemez). `_fillOfferWaveInner` çağırır.
@@ -704,15 +726,30 @@ export async function startSmartMatching(
   pickupLat  : number,
   pickupLng  : number,
   customerId : string,
+  preferredDriverId?: string,
 ): Promise<void> {
 
-  logger.info(`[SmartMatching] Starting for ride ${rideId}`);
+  logger.info(
+    `[SmartMatching] Starting for ride ${rideId}` +
+      (preferredDriverId ? ` (favori sürücü: ${preferredDriverId})` : ''),
+  );
 
   // Sweeper bağlamı (customer + pickup) — restart sonrası bu sayede ilerlenebilir.
   await saveMatchingContext(rideId, { customerId, pickupLat, pickupLng });
 
   await redis.del(REDIS_KEYS.matchingQueue(rideId));
-  const queuedCount = await searchAndEnqueueDrivers(rideId, pickupLat, pickupLng);
+  let queuedCount = preferredDriverId
+    ? await enqueuePreferredDriver(rideId, preferredDriverId)
+    : await searchAndEnqueueDrivers(rideId, pickupLat, pickupLng);
+
+  // Favori sürücü o an uygun değilse (ör. tam o sırada çevrimdışı olmuş) sessizce vazgeçme —
+  // aynı isteği normal yakınlık aramasına düşür. `retrySearchOnce`'ı burada TÜKETMİYORUZ
+  // (o, kuyruk dolup teklifler gönderildikten SONRA tükenmesi için ayrılmış tek seferlik hak);
+  // bu yalnızca "hiç kuyruğa giremedi" durumunun normal aramaya eşdeğer hale getirilmesi.
+  if (queuedCount === 0 && preferredDriverId) {
+    queuedCount = await searchAndEnqueueDrivers(rideId, pickupLat, pickupLng);
+  }
+
   if (queuedCount === 0) {
     await handleNoDriversAvailable(rideId, customerId);
     return;

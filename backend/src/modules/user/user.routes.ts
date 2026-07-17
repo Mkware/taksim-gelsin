@@ -6,6 +6,8 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { supabaseAdmin } from '../../config/supabase';
+import { drivingMetersAndSecondsDriverToPickup } from '../../services/driving_distance.service';
+import { decodeEwkbPoint } from '../../utils/geo';
 
 const router = Router();
 
@@ -108,6 +110,168 @@ router.delete('/me/push-token', async (req: Request, res: Response) => {
     res.json({ success: true, message: 'Push token silindi.' });
   } catch {
     res.status(500).json({ success: false, error: 'Push token silinemedi.' });
+  }
+});
+
+// ─── Favori sürücüler (favori sürücü çağırma) ─────────────────────────────
+
+const DRIVER_CODE_RE = /^\d{4}$/;
+
+/** Favori sürücüleri getir — çevrimiçi olanlar için (lat/lng verilmişse) ETA hesaplanır. */
+router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+
+    const { data, error } = await supabaseAdmin
+      .from('customer_favorite_drivers')
+      .select(`
+        driver_id,
+        drivers:driver_id (
+          id, vehicle_plate, vehicle_model, vehicle_color, is_online, current_location,
+          users:id (full_name, rating, rating_count)
+        )
+      `)
+      .eq('customer_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      res.status(500).json({ success: false, error: 'Favori sürücüler alınamadı.' });
+      return;
+    }
+
+    const rows = (data ?? []) as unknown as Array<{
+      driver_id: string;
+      drivers: {
+        id: string;
+        vehicle_plate: string;
+        vehicle_model: string;
+        vehicle_color: string;
+        is_online: boolean;
+        current_location: unknown;
+        users: { full_name: string; rating: number; rating_count: number } | null;
+      } | null;
+    }>;
+
+    const qLat = Number(req.query.lat);
+    const qLng = Number(req.query.lng);
+    const haveOrigin = Number.isFinite(qLat) && Number.isFinite(qLng);
+
+    const onlineWithLocation = rows
+      .map((r) => r.drivers)
+      .filter((d): d is NonNullable<typeof d> => !!d && d.is_online)
+      .map((d) => ({ id: d.id, point: decodeEwkbPoint(d.current_location) }))
+      .filter((d): d is { id: string; point: { lat: number; lng: number } } => !!d.point);
+
+    const etaByDriverId = new Map<string, number>();
+    if (haveOrigin && onlineWithLocation.length > 0) {
+      try {
+        const driving = await drivingMetersAndSecondsDriverToPickup(
+          qLat,
+          qLng,
+          onlineWithLocation.map((d) => d.point),
+        );
+        onlineWithLocation.forEach((d, i) => {
+          const seconds = driving[i]?.seconds;
+          if (Number.isFinite(seconds)) etaByDriverId.set(d.id, seconds as number);
+        });
+      } catch {
+        // ETA hesaplanamazsa liste yine dönsün, yalnızca eta_seconds boş kalır
+      }
+    }
+
+    const result = rows
+      .filter((r) => !!r.drivers)
+      .map((r) => {
+        const d = r.drivers!;
+        return {
+          driver_id: d.id,
+          full_name: d.users?.full_name ?? '',
+          rating: d.users?.rating ?? 5,
+          vehicle_plate: d.vehicle_plate,
+          vehicle_model: d.vehicle_model,
+          vehicle_color: d.vehicle_color,
+          is_online: d.is_online,
+          eta_seconds: etaByDriverId.get(d.id) ?? null,
+        };
+      });
+
+    res.json({ success: true, data: result });
+  } catch {
+    res.status(500).json({ success: false, error: 'Favori sürücüler alınırken hata oluştu.' });
+  }
+});
+
+/** Favori sürücü ekle — sürücü numarasıyla (maks. 3, telefon numarası kullanılmaz). */
+router.post('/me/favorite-drivers', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const code = typeof req.body?.driver_code === 'string' ? req.body.driver_code.trim() : '';
+
+    if (!DRIVER_CODE_RE.test(code)) {
+      res.status(400).json({ success: false, error: 'Geçerli bir sürücü numarası girin.' });
+      return;
+    }
+
+    const { data: driver, error: driverError } = await supabaseAdmin
+      .from('drivers')
+      .select('id')
+      .eq('driver_code', code)
+      .single();
+
+    if (driverError || !driver) {
+      res.status(404).json({ success: false, error: 'Sürücü bulunamadı.' });
+      return;
+    }
+
+    const { count } = await supabaseAdmin
+      .from('customer_favorite_drivers')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_id', userId);
+
+    if ((count ?? 0) >= 3) {
+      res.status(400).json({ success: false, error: 'En fazla 3 favori sürücü ekleyebilirsiniz.' });
+      return;
+    }
+
+    const { error: insertError } = await supabaseAdmin
+      .from('customer_favorite_drivers')
+      .insert({ customer_id: userId, driver_id: driver.id });
+
+    if (insertError) {
+      if (insertError.code === '23505') {
+        res.status(409).json({ success: false, error: 'Bu sürücü zaten favorilerinizde.' });
+        return;
+      }
+      res.status(500).json({ success: false, error: 'Favori sürücü eklenemedi.' });
+      return;
+    }
+
+    res.json({ success: true, message: 'Favori sürücü eklendi.' });
+  } catch {
+    res.status(500).json({ success: false, error: 'Favori sürücü eklenirken hata oluştu.' });
+  }
+});
+
+/** Favori sürücü çıkar. */
+router.delete('/me/favorite-drivers/:driverId', async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const { driverId } = req.params;
+
+    if (!isValidUUID(driverId)) {
+      res.status(400).json({ success: false, error: 'Geçerli bir sürücü UUID gerekli.' });
+      return;
+    }
+
+    await supabaseAdmin
+      .from('customer_favorite_drivers')
+      .delete()
+      .eq('customer_id', userId)
+      .eq('driver_id', driverId);
+
+    res.json({ success: true, message: 'Favori sürücü çıkarıldı.' });
+  } catch {
+    res.status(500).json({ success: false, error: 'Favori sürücü çıkarılırken hata oluştu.' });
   }
 });
 

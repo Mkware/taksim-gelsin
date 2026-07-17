@@ -25,7 +25,7 @@ router.get('/me', roleMiddleware(['driver']), async (req: Request, res: Response
     const { data, error } = await supabaseAdmin
       .from('drivers')
       .select(`
-        id, vehicle_plate, vehicle_model, vehicle_color, balance,
+        id, vehicle_plate, vehicle_model, vehicle_color, balance, driver_code,
         is_online, is_available, total_rides, created_at,
         users:id (full_name, phone, avatar_url, rating, rating_count)
       `)
@@ -77,6 +77,36 @@ router.get('/nearby', roleMiddleware(['customer']), async (req: Request, res: Re
     res.json({ success: true, data: data || [] });
   } catch {
     res.status(500).json({ success: false, error: 'Sürücü arama sırasında hata oluştu.' });
+  }
+});
+
+// Sürücü numarasıyla ara (favori sürücü ekleme akışı — telefon numarası kullanılmaz)
+router.get('/by-code/:code', roleMiddleware(['customer']), async (req: Request, res: Response) => {
+  try {
+    const code = (req.params.code || '').trim();
+    if (!/^\d{4}$/.test(code)) {
+      res.status(404).json({ success: false, error: 'Sürücü bulunamadı.' });
+      return;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('drivers')
+      .select(`
+        id, vehicle_plate, vehicle_model, vehicle_color, is_online,
+        users:id (full_name, rating, rating_count)
+      `)
+      .eq('driver_code', code)
+      .single();
+
+    if (error || !data) {
+      // Format geçerli ama eşleşme yok — var/yok ayrımı yapmadan aynı jenerik mesaj (enumeration'a ipucu vermemek için)
+      res.status(404).json({ success: false, error: 'Sürücü bulunamadı.' });
+      return;
+    }
+
+    res.json({ success: true, data });
+  } catch {
+    res.status(500).json({ success: false, error: 'Sürücü aranırken hata oluştu.' });
   }
 });
 
