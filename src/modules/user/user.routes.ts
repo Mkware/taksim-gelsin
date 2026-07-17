@@ -8,6 +8,7 @@ import { authMiddleware } from '../../middleware/auth.middleware';
 import { supabaseAdmin } from '../../config/supabase';
 import { drivingMetersAndSecondsDriverToPickup } from '../../services/driving_distance.service';
 import { decodeEwkbPoint } from '../../utils/geo';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -135,6 +136,7 @@ router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
       .order('created_at', { ascending: true });
 
     if (error) {
+      logger.error('[FavoriteDrivers] GET select hata:', error);
       res.status(500).json({ success: false, error: 'Favori sürücüler alınamadı.' });
       return;
     }
@@ -196,7 +198,8 @@ router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
       });
 
     res.json({ success: true, data: result });
-  } catch {
+  } catch (e) {
+    logger.error('[FavoriteDrivers] GET beklenmeyen hata:', e);
     res.status(500).json({ success: false, error: 'Favori sürücüler alınırken hata oluştu.' });
   }
 });
