@@ -53,6 +53,60 @@ export const DRIVER_HEARTBEAT_KEY = 'driver:heartbeat:';
 // Heartbeat TTL (sn) — 3 dakika
 const DRIVER_HEARTBEAT_TTL_SEC = 180;
 
+/**
+ * Disconnect sonrası çevrimdışına çekmeden önce beklenen süre.
+ * JWT yenilemesinde istemci socket'i koparıp yeni token'la ~1 sn içinde yeniden
+ * bağlanır (providers.dart onAccessTokenRefreshed → socket.connect). Anında
+ * çevrimdışı yapmak bu kısacık pencerede sürücüyü DB'de offline gösteriyor ve
+ * bekleyen teklifi başka sürücüye devrediyordu. Bekleme süresi içinde yeni bir
+ * go_online gelirse (socket eşlemesi yeniden yazılır) temizlik tamamen atlanır.
+ * Süreç restart'ında timer kaybolursa driver_cleanup cron'u hayaleti yakalar.
+ */
+const DRIVER_DISCONNECT_GRACE_MS = 12_000;
+/** Sürücü başına bekleyen çevrimdışı timer'ı — yeni disconnect/go_online eskisini iptal eder. */
+const pendingOfflineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Bekleme süresi dolunca çalışır: sürücü hâlâ bağlı değilse DB + Redis temizliği yapar.
+ * Bu sürede yeni bir go_online geldiyse (socket eşlemesi yeniden yazılmıştır) hiçbir şey yapmaz.
+ */
+async function finalizeDriverOffline(userId: string): Promise<void> {
+  // Bekleme süresi içinde yeniden çevrimiçi olduysa: temizlik iptal.
+  const liveSocketId = await redis.get(`${DRIVER_SOCKET_KEY}${userId}`);
+  if (liveSocketId) {
+    logger.debug(`🔌 Gecikmeli çevrimdışı atlandı (yeniden bağlandı): ${userId} [${liveSocketId}]`);
+    return;
+  }
+
+  const hasActiveRide = await driverHasInFlightAssignedRide(userId);
+  if (hasActiveRide) {
+    logger.info(`🔌 Sürücü socket koptu (aktif yolculuk var — DB çevrimiçi korunur): ${userId}`);
+    return;
+  }
+
+  const { error: offErr } = await supabaseAdmin
+    .from('drivers')
+    .update({ is_online: false, is_available: false })
+    .eq('id', userId);
+
+  if (offErr) {
+    logger.warn(`driver:disconnect çevrimdışı DB hata [${userId}]:`, offErr);
+  }
+
+  await Promise.all([
+    redis.del(`${DRIVER_LOCATION_KEY}${userId}`),
+    redis.del(`${DRIVER_ACTIVE_RIDE_KEY}${userId}`),
+    redis.del(`${DRIVER_HEARTBEAT_KEY}${userId}`),
+  ]);
+
+  // Bekleyen teklif varsa sıradaki sürücüye geç (ghost beklemesi olmasın)
+  void handleDriverOfflineAbandon(userId).catch((e) =>
+    logger.warn(`driver:disconnect bekleyen teklif devri hatası [${userId}]:`, e),
+  );
+
+  logger.info(`🔌 Sürücü socket koptu → çevrimdışı yapıldı (mesai yok): ${userId}`);
+}
+
 /** Atanmış ve süren yolculuk — sadece bu durumda disconnect'te DB çevrimiçi korunur */
 async function driverHasInFlightAssignedRide(driverId: string): Promise<boolean> {
   const { data } = await supabaseAdmin
@@ -108,6 +162,13 @@ export function registerDriverHandlers(socket: TypedSocket, io: TypedSocketServe
    */
   socket.on('driver:go_online', async (_payload: DriverGoOnlinePayload) => {
     try {
+      // Bekleyen gecikmeli çevrimdışı temizliği varsa iptal et (reconnect başarılı).
+      const pendingOffline = pendingOfflineTimers.get(userId);
+      if (pendingOffline) {
+        clearTimeout(pendingOffline);
+        pendingOfflineTimers.delete(userId);
+      }
+
       const bal = await fetchDriverBalance(userId);
       if (!canDriverTurnOnline(bal)) {
         const minB = getPlatformSettings().minDriverOnlineBalanceTcoin;
@@ -197,6 +258,13 @@ export function registerDriverHandlers(socket: TypedSocket, io: TypedSocketServe
    */
   socket.on('driver:go_offline', async (_payload: DriverGoOfflinePayload) => {
     try {
+      // Bilinçli çevrimdışı — bekleyen gecikmeli temizlik varsa gereksiz, iptal et.
+      const pendingOffline = pendingOfflineTimers.get(userId);
+      if (pendingOffline) {
+        clearTimeout(pendingOffline);
+        pendingOfflineTimers.delete(userId);
+      }
+
       await supabaseAdmin
         .from('drivers')
         .update({ is_online: false, is_available: false })
@@ -372,37 +440,26 @@ export function registerDriverHandlers(socket: TypedSocket, io: TypedSocketServe
         return;
       }
 
+      // Socket eşlemesi hemen silinir — eşleştirme bekleme süresi boyunca da
+      // ölü sokete teklif göndermesin (canlı-socket filtresi bu anahtara bakar).
       if (storedSocketId === socket.id) {
         await redis.del(`${DRIVER_SOCKET_KEY}${userId}`);
       }
 
-      const hasActiveRide = await driverHasInFlightAssignedRide(userId);
-      if (hasActiveRide) {
-        logger.info(`🔌 Sürücü socket koptu (aktif yolculuk var — DB çevrimiçi korunur): ${userId}`);
-        return;
-      }
-
-      const { error: offErr } = await supabaseAdmin
-        .from('drivers')
-        .update({ is_online: false, is_available: false })
-        .eq('id', userId);
-
-      if (offErr) {
-        logger.warn(`driver:disconnect çevrimdışı DB hata [${userId}]:`, offErr);
-      }
-
-      await Promise.all([
-        redis.del(`${DRIVER_LOCATION_KEY}${userId}`),
-        redis.del(`${DRIVER_ACTIVE_RIDE_KEY}${userId}`),
-        redis.del(`${DRIVER_HEARTBEAT_KEY}${userId}`),
-      ]);
-
-      // Bekleyen teklif varsa hemen sıradaki sürücüye geç (ghost beklemesi olmasın)
-      void handleDriverOfflineAbandon(userId).catch((e) =>
-        logger.warn(`driver:disconnect bekleyen teklif devri hatası [${userId}]:`, e),
+      // DB çevrimdışı + temizlik BEKLETİLİR: token yenileme reconnect'i (~1 sn)
+      // bu pencerede go_online gönderir ve temizlik tamamen atlanır.
+      const prev = pendingOfflineTimers.get(userId);
+      if (prev) clearTimeout(prev);
+      const timer = setTimeout(() => {
+        pendingOfflineTimers.delete(userId);
+        void finalizeDriverOffline(userId).catch((e) =>
+          logger.error(`Sürücü gecikmeli çevrimdışı hatası [${userId}]:`, e),
+        );
+      }, DRIVER_DISCONNECT_GRACE_MS);
+      pendingOfflineTimers.set(userId, timer);
+      logger.debug(
+        `🔌 Sürücü socket koptu — ${DRIVER_DISCONNECT_GRACE_MS / 1000} sn yeniden bağlanma bekleniyor: ${userId}`,
       );
-
-      logger.info(`🔌 Sürücü socket koptu → çevrimdışı yapıldı (mesai yok): ${userId}`);
     } catch (error) {
       logger.error(`Sürücü disconnect hatası [${userId}]:`, error);
     }
