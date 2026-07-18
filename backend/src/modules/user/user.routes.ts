@@ -74,6 +74,9 @@ router.post('/me/push-token', async (req: Request, res: Response) => {
     const now = new Date().toISOString();
     // Aynı FCM token tek satır: önce tüm sahiplikten sil (başka hesapta kalmış satır kalmasın).
     await supabaseAdmin.from('device_push_tokens').delete().eq('token', token);
+    // Tek aktif oturum modeli: kullanıcı başına tek cihaz token'ı — son kaydeden
+    // cihaz kazanır, eski cihazlara push gitmez (bkz. auth.service login temizliği).
+    await supabaseAdmin.from('device_push_tokens').delete().eq('user_id', userId);
     const { error } = await supabaseAdmin.from('device_push_tokens').insert({
       user_id: userId,
       token,
