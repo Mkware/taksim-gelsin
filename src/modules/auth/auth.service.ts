@@ -313,6 +313,16 @@ export async function login(input: LoginInput): Promise<AuthResult> {
   // Yalnızca önceki oturum sürümündeki socket'leri kes (yeni token ile bağlanan cihazı kesme)
   disconnectStaleSocketsForUser(user.id, nextSv);
 
+  // Tek aktif oturum → push da yalnızca son cihaza gitsin: eski cihazların
+  // token'larını sil; giriş yapan cihaz ana ekranda kendi token'ını yeniden kaydeder.
+  const { error: tokenClearError } = await supabaseAdmin
+    .from('device_push_tokens')
+    .delete()
+    .eq('user_id', user.id);
+  if (tokenClearError) {
+    logger.warn(`Push token temizliği başarısız [${user.id}]:`, tokenClearError.message);
+  }
+
   logger.info(`Giriş başarılı: ${user.phone} (${user.role})`);
 
   const completedRides = await countCompletedRides(user.id, user.role as 'customer' | 'driver');
