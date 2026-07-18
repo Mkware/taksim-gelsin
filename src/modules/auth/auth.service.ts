@@ -222,7 +222,7 @@ export async function registerDriver(input: DriverRegisterInput): Promise<Driver
         vehicle_plate,
         vehicle_model,
         vehicle_color,
-        driver_code: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
+        driver_code: String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0'),
       });
     driverError = error;
     if (!error || error.code !== '23505') break;

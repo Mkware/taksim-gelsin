@@ -4,6 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { roleMiddleware } from '../../middleware/role.middleware';
 import { supabaseAdmin } from '../../config/supabase';
@@ -15,6 +16,19 @@ const router = Router();
 
 // Tüm driver route'ları JWT ile korunur
 router.use(authMiddleware);
+
+// Sürücü numarası (driver_code) brute-force koruması — kimlik doğrulamalı bir hesap
+// dahi olsa numarayı tarayarak sürücü bulmayı pratik olmaktan çıkarır.
+const driverCodeLookupLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Çok fazla deneme. Lütfen bir dakika bekleyin.',
+  },
+});
 
 // Sürücü profili getir
 router.get('/me', roleMiddleware(['driver']), async (req: Request, res: Response) => {
@@ -81,10 +95,10 @@ router.get('/nearby', roleMiddleware(['customer']), async (req: Request, res: Re
 });
 
 // Sürücü numarasıyla ara (favori sürücü ekleme akışı — telefon numarası kullanılmaz)
-router.get('/by-code/:code', roleMiddleware(['customer']), async (req: Request, res: Response) => {
+router.get('/by-code/:code', driverCodeLookupLimiter, roleMiddleware(['customer']), async (req: Request, res: Response) => {
   try {
     const code = (req.params.code || '').trim();
-    if (!/^\d{4}$/.test(code)) {
+    if (!/^\d{6}$/.test(code)) {
       res.status(404).json({ success: false, error: 'Sürücü bulunamadı.' });
       return;
     }
