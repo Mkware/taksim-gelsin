@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/ride_model.dart';
@@ -114,7 +116,7 @@ class _RateRideScreenState extends ConsumerState<RateRideScreen> {
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                Icons.star_border_rounded,
+                LucideIcons.star,
                 size: 48,
                 color: AppTheme.primaryColor,
               ),
@@ -151,7 +153,14 @@ class _RateRideScreenState extends ConsumerState<RateRideScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.circle, color: AppTheme.accentColor, size: 8),
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: AppTheme.accentColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
@@ -165,7 +174,14 @@ class _RateRideScreenState extends ConsumerState<RateRideScreen> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.circle, color: AppTheme.errorColor, size: 8),
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: AppTheme.errorColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
@@ -211,8 +227,8 @@ class _RateRideScreenState extends ConsumerState<RateRideScreen> {
                     padding: const EdgeInsets.all(6),
                     child: Icon(
                       starNumber <= _selectedRating
-                          ? Icons.star_rounded
-                          : Icons.star_border_rounded,
+                          ? CupertinoIcons.star_fill
+                          : CupertinoIcons.star,
                       color: starNumber <= _selectedRating
                           ? AppTheme.primaryColor
                           : AppTheme.textSecondary.withOpacity(0.4),
@@ -276,7 +292,7 @@ class _RateRideScreenState extends ConsumerState<RateRideScreen> {
                           strokeWidth: 2.5,
                         ),
                       )
-                    : const Icon(Icons.send, size: 22),
+                    : const Icon(LucideIcons.send, size: 22),
                 label: Text(
                   _isSubmitting ? 'Gönderiliyor...' : 'Değerlendirmeyi Gönder',
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),

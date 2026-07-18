@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -114,13 +115,13 @@ class _DriverWalletScreenState extends ConsumerState<DriverWalletScreen> {
                   minimumSize: const Size.fromHeight(48),
                 ),
                 onPressed: () => Navigator.pop(ctx, 'call'),
-                icon: const Icon(Icons.call_rounded),
+                icon: const Icon(LucideIcons.phone),
                 label: const Text('Operasyonu ara'),
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
                 onPressed: () => Navigator.pop(ctx, 'wa'),
-                icon: const Icon(Icons.chat_rounded),
+                icon: const Icon(LucideIcons.messageCircle),
                 label: const Text('WhatsApp ile yaz'),
               ),
             ],
@@ -202,7 +203,7 @@ class _DriverWalletScreenState extends ConsumerState<DriverWalletScreen> {
         backgroundColor: AppTheme.primaryColor,
         foregroundColor: AppTheme.secondaryColor,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
+          icon: const Icon(LucideIcons.arrowLeft),
           onPressed: () => context.pop(),
         ),
       ),
@@ -237,7 +238,7 @@ class _DriverWalletScreenState extends ConsumerState<DriverWalletScreen> {
                           color: AppTheme.primaryColor.withOpacity(0.18),
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        child: Icon(Icons.currency_exchange_rounded,
+                        child: Icon(LucideIcons.handCoins,
                             color: AppTheme.primaryColor, size: 28),
                       ),
                       const SizedBox(width: 12),
@@ -318,7 +319,7 @@ class _DriverWalletScreenState extends ConsumerState<DriverWalletScreen> {
                   ),
                 ActionChip(
                   label: const Text('Diğer tutar'),
-                  avatar: const Icon(Icons.edit_rounded, size: 18),
+                  avatar: const Icon(LucideIcons.pencil, size: 18),
                   onPressed: _pickCustom,
                   backgroundColor: AppTheme.primaryColor.withOpacity(0.08),
                   side: BorderSide(color: AppTheme.primaryColor.withOpacity(0.28)),

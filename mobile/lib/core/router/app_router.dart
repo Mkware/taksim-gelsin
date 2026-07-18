@@ -10,6 +10,7 @@ import '../../screens/auth/login_screen.dart';
 import '../../screens/auth/register_screen.dart';
 import '../../screens/customer/customer_home_screen.dart';
 import '../../screens/customer/ride_history_screen.dart';
+import '../../screens/customer/favorite_drivers_screen.dart';
 import '../../screens/driver/driver_home_screen.dart';
 import '../../screens/driver/driver_wallet_screen.dart';
 import '../../screens/profile/profile_screen.dart';
@@ -107,6 +108,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/customer/history',
         builder: (context, state) => const RideHistoryScreen(),
+      ),
+
+      // Müşteri favori sürücüleri
+      GoRoute(
+        path: '/customer/favorite-drivers',
+        builder: (context, state) => const FavoriteDriversScreen(),
       ),
 
       // Sürücü ana ekranı

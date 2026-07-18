@@ -487,6 +487,7 @@ class SocketService {
     required String dropoffAddress,
     required double estimatedPrice,
     required double distanceKm,
+    String? preferredDriverId,
   }) {
     _emit('ride:request', {
       'pickup': pickup.toJson(),
@@ -495,6 +496,7 @@ class SocketService {
       'dropoffAddress': dropoffAddress,
       'estimatedPrice': estimatedPrice,
       'distanceKm': distanceKm,
+      if (preferredDriverId != null) 'preferredDriverId': preferredDriverId,
     });
   }
 

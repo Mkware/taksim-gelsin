@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -38,6 +39,23 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
       duration: const Duration(milliseconds: 950),
       value: 1,
     );
+    // Bildirime tıklanarak gelindiyse sohbeti aç (sheet mount olduğunda ride hazır).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenPendingChat());
+  }
+
+  void _maybeOpenPendingChat() {
+    if (!mounted) return;
+    final ride = ref.read(activeRideProvider) ?? widget.ride;
+    final pending = ref.read(pendingChatOpenRideIdProvider);
+    if (pending == null || pending != ride.id) return;
+    ref.read(pendingChatOpenRideIdProvider.notifier).state = null;
+    final driver = ref.read(assignedDriverProvider);
+    showRideChatSheet(
+      context,
+      ref: ref,
+      rideId: ride.id,
+      peerName: driver == null ? 'Sürücü' : _shortNameWithSurnameInitial(driver.fullName),
+    );
   }
 
   /// Nabız animasyonu yalnızca "sürücü geldi" satırı görünürken çalışsın —
@@ -68,6 +86,26 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
   }
 
   Future<void> _callEmergency() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('112 Acil Servisi aranıyor'),
+        content: const Text('112 Acil Servisi\'ni aramak istediğinizden emin misiniz?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+            child: const Text('Ara'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
     final ok = await launchUrl(Uri.parse('tel:112'));
     if (!ok && mounted) {
       showTopOverlayToast(context, 'Arama başlatılamadı.', AppTheme.errorColor);
@@ -105,6 +143,10 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(pendingChatOpenRideIdProvider, (prev, next) {
+      if (next == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenPendingChat());
+    });
     // Her zaman provider — temp_ → gerçek id veya PIN güncellemesi kaçırılmasın.
     final ride = ref.watch(activeRideProvider) ?? widget.ride;
     // Konum (lat/lng) hariç alanları izle: sürücünün 5 sn'de bir gelen canlı
@@ -128,73 +170,114 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
         color: Color(0xFFF2F3F5),
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLg)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Stack(
         children: [
-          const SizedBox(height: 8),
-          Center(
-            child: Container(
-              width: 42,
-              height: 4,
-              decoration: BoxDecoration(
-                color: const Color(0xFFBFC4CC),
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Expanded(
-            child: SingleChildScrollView(
-              controller: widget.sheetScrollController,
-              physics: const ClampingScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(edge, 10, edge, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (ride.status == RideStatus.searching)
-                    _sectionCard(
-                      child: const RideSearchingProgressCard(),
-                    ),
-                  if (driver != null && ride.status != RideStatus.searching)
-                    _driverHeaderCard(driver, ride.status, ride.id),
-                  if (_waitingForPickupCode(ride))
-                    _sectionCard(
-                      child: Row(
-                        children: [
-                          const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2.2),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Eşleşme kodu hazırlanıyor...',
-                              style: GoogleFonts.inter(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_showPickupCode(ride))
-                    _sectionCard(child: _pickupCodePanel(ride.pickupVerificationCode!)),
-                  _sectionCard(
-                    child: _morePanel(
-                      showCancel: showCancel,
-                      onCancel: () => _showCancelDialog(context, ref, ride),
-                    ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFBFC4CC),
+                    borderRadius: BorderRadius.circular(999),
                   ),
-                  _sectionCard(child: _paymentPanel(ride)),
-                  _sectionCard(child: _routePanel(ride)),
-                  SizedBox(height: 8 + bottomInset * 0.25),
-                ],
+                ),
               ),
-            ),
+              const SizedBox(height: 6),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: widget.sheetScrollController,
+                  physics: const ClampingScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(edge, 10, edge, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (ride.status == RideStatus.searching)
+                        _sectionCard(
+                          child: const RideSearchingProgressCard(),
+                        ),
+                      if (driver != null && ride.status != RideStatus.searching)
+                        _driverHeaderCard(driver, ride.status, ride.id),
+                      if (_waitingForPickupCode(ride))
+                        _sectionCard(
+                          child: Row(
+                            children: [
+                              const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2.2),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Eşleşme kodu hazırlanıyor...',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (_showPickupCode(ride))
+                        _sectionCard(child: _pickupCodePanel(ride.pickupVerificationCode!)),
+                      _sectionCard(
+                        child: _morePanel(
+                          showCancel: showCancel,
+                          onCancel: () => _showCancelDialog(context, ref, ride),
+                        ),
+                      ),
+                      _sectionCard(child: _paymentPanel(ride)),
+                      _sectionCard(child: _routePanel(ride)),
+                      // 3-tuş navigasyon çubuğu son kartı örtmesin — tam inset.
+                      SizedBox(height: 8 + bottomInset),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Positioned(
+            top: 6,
+            right: 12,
+            child: _sosButton(),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Sürücüyü beklerken/yolculuk sırasında acil durum çağrısı — sheet'in
+  /// her zaman görünen köşesinde, İşlemler listesine gömülü olmadan.
+  Widget _sosButton() {
+    return Material(
+      color: AppTheme.errorColor.withValues(alpha: 0.12),
+      shape: const StadiumBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _callEmergency,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.siren, color: AppTheme.errorColor, size: 18),
+              const SizedBox(width: 5),
+              Text(
+                'SOS',
+                style: GoogleFonts.inter(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.errorColor,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -224,7 +307,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.location_on_rounded, color: const Color(0xFF0EA5E9), size: 16),
+                  Icon(LucideIcons.mapPin, color: const Color(0xFF0EA5E9), size: 16),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
@@ -244,7 +327,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
           ],
           Row(
             children: [
-              const Icon(Icons.star_rounded, color: AppTheme.primaryColor, size: 18),
+              const Icon(LucideIcons.star, color: AppTheme.primaryColor, size: 18),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -262,17 +345,23 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
               IconButton(
                 onPressed: () => showRideChatSheet(
                   context,
+                  ref: ref,
                   rideId: rideId,
                   peerName: compactName,
                 ),
-                icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                icon: Badge(
+                  isLabelVisible: ref.watch(chatUnreadCountProvider) > 0,
+                  label: Text('${ref.watch(chatUnreadCountProvider)}'),
+                  backgroundColor: AppTheme.errorColor,
+                  child: const Icon(LucideIcons.messageCircle, size: 18),
+                ),
                 tooltip: 'Sürücüye Mesaj',
               ),
               IconButton(
                 onPressed: driver.phone.trim().isEmpty
                     ? null
                     : () => _callDriver(driver.phone),
-                icon: const Icon(Icons.call_rounded, size: 18),
+                icon: const Icon(LucideIcons.phone, size: 18),
                 tooltip: 'Sürücüyü Ara',
               ),
             ],
@@ -443,7 +532,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.star_rounded,
+                    const Icon(LucideIcons.star,
                         color: AppTheme.primaryColor, size: 18),
                     const SizedBox(width: 4),
                     Text(
@@ -529,7 +618,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
         Text('Konum', style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w700)),
         const SizedBox(height: 10),
         _addressLine(
-          icon: Icons.trip_origin,
+          icon: LucideIcons.circle,
           iconColor: AppTheme.accentColor,
           label: '',
           text: ride.pickupAddress,
@@ -538,7 +627,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
         _routeDashedConnector(),
         const SizedBox(height: 4),
         _addressLine(
-          icon: Icons.adjust,
+          icon: LucideIcons.target,
           iconColor: AppTheme.ink,
           label: '',
           text: ride.dropoffAddress,
@@ -555,7 +644,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
         const SizedBox(height: 10),
         Row(
           children: [
-            const Icon(Icons.payments_outlined, color: AppTheme.success),
+            const Icon(LucideIcons.banknote, color: AppTheme.success),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -581,31 +670,17 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
         const SizedBox(height: 10),
         ListTile(
           contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.support_agent_rounded, color: AppTheme.textSecondary),
+          leading: const Icon(LucideIcons.headset, color: AppTheme.textSecondary),
           title: Text('Canlı Destek', style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600)),
-          trailing: const Icon(Icons.chevron_right_rounded),
+          trailing: const Icon(LucideIcons.chevronRight),
           onTap: () => _openWhatsAppSupport(),
-        ),
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.emergency_rounded, color: AppTheme.errorColor),
-          title: Text(
-            'Acil Durum (112)',
-            style: GoogleFonts.inter(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.errorColor,
-            ),
-          ),
-          trailing: const Icon(Icons.chevron_right_rounded, color: AppTheme.errorColor),
-          onTap: () => _callEmergency(),
         ),
         if (showCancel)
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.cancel_outlined, color: AppTheme.textSecondary),
+            leading: const Icon(LucideIcons.circleX, color: AppTheme.textSecondary),
             title: Text('Yolculuğu İptal Et', style: GoogleFonts.inter(fontSize: 12.5, fontWeight: FontWeight.w600)),
-            trailing: const Icon(Icons.chevron_right_rounded),
+            trailing: const Icon(LucideIcons.chevronRight),
             onTap: onCancel,
           ),
       ],
@@ -625,7 +700,7 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
           childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           title: Row(
             children: [
-              Icon(Icons.route_rounded, size: 20, color: AppTheme.info),
+              Icon(LucideIcons.route, size: 20, color: AppTheme.info),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -649,14 +724,14 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
           ),
           children: [
             _addressLine(
-              icon: Icons.trip_origin,
+              icon: LucideIcons.circle,
               iconColor: AppTheme.accentColor,
               label: 'Yolcu konumu',
               text: ride.pickupAddress,
             ),
             const SizedBox(height: 10),
             _addressLine(
-              icon: Icons.flag_rounded,
+              icon: LucideIcons.flag,
               iconColor: AppTheme.errorColor,
               label: 'Varış konumu',
               text: ride.dropoffAddress,
@@ -830,37 +905,37 @@ class _RideTrackingSheetState extends ConsumerState<RideTrackingSheet>
     switch (status) {
       case RideStatus.searching:
         return _StatusConfig(
-          icon: Icons.radar_rounded,
+          icon: LucideIcons.radar,
           color: AppTheme.primaryDark,
           subtitle: 'Sürücülerle eşleştiriliyor',
         );
       case RideStatus.accepted:
         return _StatusConfig(
-          icon: Icons.local_taxi_rounded,
+          icon: LucideIcons.carTaxiFront,
           color: AppTheme.info,
           subtitle: 'Sürücü yola çıktı — haritadan takip edin',
         );
       case RideStatus.arriving:
         return _StatusConfig(
-          icon: Icons.person_pin_circle_rounded,
+          icon: LucideIcons.mapPin,
           color: AppTheme.ink,
           subtitle: 'Biniş noktasına gelindi veya geliniyor',
         );
       case RideStatus.inProgress:
         return _StatusConfig(
-          icon: Icons.navigation_rounded,
+          icon: LucideIcons.navigation,
           color: AppTheme.info,
           subtitle: 'Varış adresine gidiliyor',
         );
       case RideStatus.completed:
         return _StatusConfig(
-          icon: Icons.check_circle_rounded,
+          icon: LucideIcons.circleCheck,
           color: AppTheme.success,
           subtitle: 'Yolculuk tamamlandı',
         );
       case RideStatus.cancelled:
         return _StatusConfig(
-          icon: Icons.cancel_rounded,
+          icon: LucideIcons.circleX,
           color: AppTheme.errorColor,
           subtitle: 'Bu talep iptal edildi',
         );

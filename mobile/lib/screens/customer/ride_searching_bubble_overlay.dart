@@ -1,23 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../models/ride_matching_progress_model.dart';
-import '../../providers/providers.dart';
 import 'ride_searching_animation.dart';
 
 /// Harita üstü — konuşma balonu içinde taksi arama animasyonu.
-class RideSearchingBubbleOverlay extends ConsumerStatefulWidget {
+class RideSearchingBubbleOverlay extends StatefulWidget {
   const RideSearchingBubbleOverlay({super.key});
 
   @override
-  ConsumerState<RideSearchingBubbleOverlay> createState() =>
+  State<RideSearchingBubbleOverlay> createState() =>
       _RideSearchingBubbleOverlayState();
 }
 
-class _RideSearchingBubbleOverlayState extends ConsumerState<RideSearchingBubbleOverlay>
+class _RideSearchingBubbleOverlayState extends State<RideSearchingBubbleOverlay>
     with TickerProviderStateMixin {
   late final AnimationController _headlineGlow;
   late final AnimationController _enter;
@@ -46,9 +43,6 @@ class _RideSearchingBubbleOverlayState extends ConsumerState<RideSearchingBubble
 
   @override
   Widget build(BuildContext context) {
-    final progress = ref.watch(rideMatchingProgressProvider);
-    final driverStatusLine = _driverAskStatusLine(progress);
-
     return FadeTransition(
       opacity: CurvedAnimation(parent: _enter, curve: Curves.easeOut),
       child: SlideTransition(
@@ -103,28 +97,6 @@ class _RideSearchingBubbleOverlayState extends ConsumerState<RideSearchingBubble
                         ),
                       ),
                     ),
-                    if (driverStatusLine != null) ...[
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(
-                            Icons.radar_rounded,
-                            size: 15,
-                            color: AppTheme.success,
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            driverStatusLine,
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF6B7280),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -140,19 +112,6 @@ class _RideSearchingBubbleOverlayState extends ConsumerState<RideSearchingBubble
         ),
       ),
     );
-  }
-
-  String? _driverAskStatusLine(RideMatchingProgressModel? progress) {
-    if (progress == null) return null;
-    if (progress.currentOfferSecondsLeft != null) {
-      final n = progress.driversAsked > 0 ? progress.driversAsked : 1;
-      return '$n. sürücüye soruluyor';
-    }
-    final asked = progress.driversAsked;
-    if (asked > 0) {
-      return '$asked. sürücüye soruldu';
-    }
-    return null;
   }
 }
 

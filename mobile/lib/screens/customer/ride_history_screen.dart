@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:shimmer/shimmer.dart';
@@ -127,7 +128,7 @@ class _RideHistoryScreenState extends ConsumerState<RideHistoryScreen> {
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
+          icon: const Icon(LucideIcons.chevronLeft),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
         title: const Text('Yolculuk Geçmişi'),
@@ -196,7 +197,7 @@ class _RideHistoryScreenState extends ConsumerState<RideHistoryScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.cloud_off_rounded, size: 64, color: AppTheme.textMuted),
+          const Icon(LucideIcons.cloudOff, size: 64, color: AppTheme.textMuted),
           const SizedBox(height: 16),
           Text(_error!, style: const TextStyle(color: AppTheme.textSecondary)),
           const SizedBox(height: 16),
@@ -240,7 +241,7 @@ class _RideHistoryScreenState extends ConsumerState<RideHistoryScreen> {
                 color: AppTheme.primaryColor.withOpacity(0.12),
               ),
               child: const Icon(
-                Icons.history_rounded,
+                LucideIcons.history,
                 size: 44,
                 color: AppTheme.primaryColor,
               ),
@@ -345,7 +346,7 @@ class _RideCard extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.schedule_rounded,
+                    const Icon(LucideIcons.clock,
                         size: 12, color: AppTheme.textSecondary),
                     const SizedBox(width: 4),
                     Text(
@@ -401,7 +402,7 @@ class _RideCard extends StatelessWidget {
             const SizedBox(height: 10),
             Row(
               children: [
-                const Icon(Icons.route_rounded,
+                const Icon(LucideIcons.route,
                     size: 14, color: AppTheme.textSecondary),
                 const SizedBox(width: 6),
                 Text(

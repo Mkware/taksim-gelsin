@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -56,7 +57,13 @@ class StorageService {
   UserModel? getUser() {
     final data = _prefs.getString(AppConstants.userDataKey);
     if (data == null) return null;
-    return UserModel.fromJson(jsonDecode(data) as Map<String, dynamic>);
+    try {
+      return UserModel.fromJson(jsonDecode(data) as Map<String, dynamic>);
+    } catch (_) {
+      // Eski sürümden/yedekten gelen bozuk kayıt — oturumsuz devam et, kaydı temizle.
+      unawaited(_prefs.remove(AppConstants.userDataKey));
+      return null;
+    }
   }
 
   Future<void> clearUser() async {

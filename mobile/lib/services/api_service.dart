@@ -260,6 +260,23 @@ class ApiService {
     return _dio.delete('/users/me/push-token', data: {'token': token});
   }
 
+  /// Favori sürücü çağırma — sürücü numarasıyla ara (telefon numarası kullanılmaz).
+  Future<Response> lookupDriverByCode(String code) => _dio.get('/drivers/by-code/$code');
+
+  Future<Response> getFavoriteDrivers({double? lat, double? lng}) {
+    return _dio.get('/users/me/favorite-drivers', queryParameters: {
+      if (lat != null) 'lat': lat,
+      if (lng != null) 'lng': lng,
+    });
+  }
+
+  Future<Response> addFavoriteDriver(String driverCode) {
+    return _dio.post('/users/me/favorite-drivers', data: {'driver_code': driverCode});
+  }
+
+  Future<Response> removeFavoriteDriver(String driverId) =>
+      _dio.delete('/users/me/favorite-drivers/$driverId');
+
   // ============================================================
   // DRIVER ENDPOINT'LERİ
   // ============================================================

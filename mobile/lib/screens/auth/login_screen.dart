@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -107,9 +108,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     leading: Text(c.flag, style: const TextStyle(fontSize: 26)),
                     title: Text(c.name, style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                     trailing: selected
-                        ? const Icon(Icons.check_circle_rounded, color: AppTheme.success)
+                        ? const Icon(LucideIcons.circleCheck, color: AppTheme.success)
                         : Icon(
-                            Icons.circle_outlined,
+                            LucideIcons.circle,
                             color: AppTheme.textMuted.withValues(alpha: 0.5),
                           ),
                     onTap: () {
@@ -272,7 +273,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.error_outline_rounded,
+                              const Icon(LucideIcons.circleAlert,
                                   color: AppTheme.errorColor, size: 20),
                               const SizedBox(width: 10),
                               Expanded(
@@ -341,7 +342,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                           ),
                                           const SizedBox(width: 2),
                                           const Icon(
-                                            Icons.expand_more_rounded,
+                                            LucideIcons.chevronDown,
                                             color: AppTheme.textMuted,
                                             size: 22,
                                           ),
@@ -424,14 +425,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             vertical: 18,
                           ),
                           prefixIcon:
-                              const Icon(Icons.lock_outline_rounded, color: AppTheme.textSecondary),
+                              const Icon(LucideIcons.lock, color: AppTheme.textSecondary),
                           suffixIcon: IconButton(
                             icon: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 180),
                               child: Icon(
                                 _obscurePassword
-                                    ? Icons.visibility_off_rounded
-                                    : Icons.visibility_rounded,
+                                    ? LucideIcons.eyeOff
+                                    : LucideIcons.eye,
                                 key: ValueKey(_obscurePassword),
                                 color: AppTheme.textSecondary,
                               ),
@@ -468,7 +469,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       order: 7,
                       child: PrimaryGradientButton(
                         label: 'Giriş Yap',
-                        icon: Icons.login_rounded,
+                        icon: LucideIcons.logIn,
                         loading: _isLoading,
                         height: 56,
                         variant: PrimaryGradientButtonVariant.brandSolid,

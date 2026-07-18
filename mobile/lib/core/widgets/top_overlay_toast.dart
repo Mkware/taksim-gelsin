@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 OverlayEntry? _topToastEntry;
 Timer? _topToastTimer;
@@ -42,7 +43,7 @@ void showTopOverlayToast(
             ),
             child: Row(
               children: [
-                const Icon(Icons.info_outline_rounded,
+                const Icon(LucideIcons.info,
                     color: Colors.white, size: 18),
                 const SizedBox(width: 8),
                 Expanded(

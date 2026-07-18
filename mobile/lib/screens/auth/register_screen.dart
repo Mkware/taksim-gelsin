@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -92,7 +93,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
+          icon: const Icon(LucideIcons.chevronLeft),
           onPressed: () => context.pop(),
         ),
       ),
@@ -147,7 +148,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.error_outline_rounded,
+                              const Icon(LucideIcons.circleAlert,
                                   color: AppTheme.errorColor, size: 20),
                               const SizedBox(width: 10),
                               Expanded(
@@ -168,7 +169,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Ad Soyad',
                           hintText: 'Ahmet Yılmaz',
-                          prefixIcon: Icon(Icons.person_outline_rounded),
+                          prefixIcon: Icon(LucideIcons.user),
                         ),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) return 'Ad soyad gerekli.';
@@ -187,7 +188,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Telefon Numarası',
                           hintText: '+905551112233',
-                          prefixIcon: Icon(Icons.phone_iphone_rounded),
+                          prefixIcon: Icon(LucideIcons.smartphone),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) return 'Telefon numarası gerekli.';
@@ -208,11 +209,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         obscureText: _obscurePassword,
                         decoration: InputDecoration(
                           labelText: 'Şifre',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          prefixIcon: const Icon(LucideIcons.lock),
                           suffixIcon: IconButton(
                             icon: Icon(_obscurePassword
-                                ? Icons.visibility_off_rounded
-                                : Icons.visibility_rounded),
+                                ? LucideIcons.eyeOff
+                                : LucideIcons.eye),
                             onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                           ),
                         ),
@@ -232,7 +233,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         obscureText: _obscurePassword,
                         decoration: const InputDecoration(
                           labelText: 'Şifre Tekrar',
-                          prefixIcon: Icon(Icons.verified_user_outlined),
+                          prefixIcon: Icon(LucideIcons.shieldCheck),
                         ),
                         validator: (value) {
                           if (value != _passwordController.text) return 'Şifreler eşleşmiyor.';
@@ -296,7 +297,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       order: 8,
                       child: PrimaryGradientButton(
                         label: 'Hesabı Oluştur',
-                        icon: Icons.check_circle_rounded,
+                        icon: LucideIcons.circleCheck,
                         loading: _isLoading,
                         onPressed: _isLoading ? null : _register,
                       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -22,28 +23,28 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   static const List<_OnboardingPageData> _pages = [
     _OnboardingPageData(
-      icon: Icons.waving_hand_rounded,
+      icon: LucideIcons.sparkles,
       title: 'Hoş geldiniz',
       body:
           'Taksim Gelsin ile Kırıkkale’de taksi çağırın; birkaç dokunuşla '
           'yolculuğunuzu başlatın.',
     ),
     _OnboardingPageData(
-      icon: Icons.place_rounded,
+      icon: LucideIcons.mapPin,
       title: 'Nereden, nereye',
       body:
           'Alış ve varış noktanızı seçin; tahmini ücreti görün ve talebinizi '
           'güvenle oluşturun.',
     ),
     _OnboardingPageData(
-      icon: Icons.map_rounded,
+      icon: LucideIcons.map,
       title: 'Canlı takip',
       body:
           'Sürücünüz yola çıktığında haritadan izleyin; biniş kodunuz ile '
           'güvenli eşleşme sağlanır.',
     ),
     _OnboardingPageData(
-      icon: Icons.verified_user_rounded,
+      icon: LucideIcons.shieldCheck,
       title: 'Hazırsınız',
       body:
           'Giriş yapın veya hesap oluşturun. Bildirim ve konum izinleri '
@@ -220,8 +221,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   child: PrimaryGradientButton(
                     label: _index < _pages.length - 1 ? 'Devam' : 'Başla',
                     icon: _index < _pages.length - 1
-                        ? Icons.arrow_forward_rounded
-                        : Icons.login_rounded,
+                        ? LucideIcons.arrowRight
+                        : LucideIcons.logIn,
                     height: 54,
                     variant: PrimaryGradientButtonVariant.brandSolid,
                     onPressed: _next,

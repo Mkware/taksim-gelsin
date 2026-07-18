@@ -48,7 +48,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   /// parlama → nefes alma başlangıcı) oynanana kadar geçmesi gereken süre —
   /// auth kontrolü ağdan çok hızlı dönerse (ör. zaten oturum açık bir
   /// kullanıcı) bile ekran erken kesilip animasyon yarıda kalmasın.
-  static const Duration _minSplashDuration = Duration(milliseconds: 1800);
+  static const Duration _minSplashDuration = Duration(milliseconds: 1400);
   final Stopwatch _splashStopwatch = Stopwatch()..start();
 
   Future<void> _awaitMinimumSplashDuration() async {
@@ -89,23 +89,23 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     // ─── Koreografi ───
     _bgCtrl.forward();
-    Future<void>.delayed(const Duration(milliseconds: 300), () {
+    Future<void>.delayed(const Duration(milliseconds: 230), () {
       if (!mounted) return;
       _pinCtrl.forward();
     });
-    Future<void>.delayed(const Duration(milliseconds: 380), () {
+    Future<void>.delayed(const Duration(milliseconds: 300), () {
       if (!mounted) return;
       _textCtrl.forward();
     });
-    Future<void>.delayed(const Duration(milliseconds: 900), () {
+    Future<void>.delayed(const Duration(milliseconds: 700), () {
       if (!mounted) return;
       _curveCtrl.forward();
     });
-    Future<void>.delayed(const Duration(milliseconds: 1300), () {
+    Future<void>.delayed(const Duration(milliseconds: 1000), () {
       if (!mounted) return;
       _glowCtrl.forward();
     });
-    Future<void>.delayed(const Duration(milliseconds: 1650), () {
+    Future<void>.delayed(const Duration(milliseconds: 1300), () {
       if (!mounted) return;
       _breatheCtrl.repeat(reverse: true);
     });
@@ -126,6 +126,23 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   // ─── Auth akışı (mevcut mantık korunuyor) ───
   Future<void> _checkAuth() async {
+    try {
+      await _checkAuthInner();
+    } catch (e) {
+      // Ne olursa olsun splash'te asılı kalma (ör. yedekten dönen bozuk depo verisi) —
+      // oturumsuz akışa düş.
+      debugPrint('Splash auth kontrolü hatası: $e');
+      await _awaitMinimumSplashDuration();
+      if (!mounted) return;
+      var onboarded = true;
+      try {
+        onboarded = ref.read(storageServiceProvider).isOnboardingCompleted();
+      } catch (_) {}
+      context.go(onboarded ? '/auth/login' : '/onboarding');
+    }
+  }
+
+  Future<void> _checkAuthInner() async {
     final storage = ref.read(storageServiceProvider);
     await storage.init();
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,6 +7,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/top_overlay_toast.dart';
+import '../../models/favorite_driver_model.dart';
 import '../../models/ride_model.dart' hide LatLng;
 import '../../models/ride_model.dart' as models show LatLng;
 import '../../providers/providers.dart';
@@ -170,7 +172,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
     return (pickup: pickup, dropoff: dropoff);
   }
 
-  Future<void> _requestRide() async {
+  Future<void> _requestRide({String? preferredDriverId}) async {
     if (widget.pickupPosition == null || widget.dropoffPosition == null) {
       return;
     }
@@ -195,6 +197,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
         dropoffAddress: addr.dropoff,
         estimatedPrice: _estimatedPrice!,
         distanceKm: _estimatedDistance!,
+        preferredDriverId: preferredDriverId,
       );
 
       ref.read(rideMatchingProgressProvider.notifier).clear();
@@ -218,6 +221,149 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
     } finally {
       if (mounted) setState(() => _isRequesting = false);
     }
+  }
+
+  Future<List<FavoriteDriverModel>> _fetchFavoriteDrivers(double lat, double lng) async {
+    try {
+      final res = await ref.read(apiServiceProvider).getFavoriteDrivers(lat: lat, lng: lng);
+      final body = res.data;
+      if (res.statusCode != 200 || body is! Map || body['success'] != true) return [];
+      final list = body['data'];
+      if (list is! List) return [];
+      return list
+          .whereType<Map>()
+          .map((e) => FavoriteDriverModel.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _showFavoriteDriversSheet() async {
+    if (widget.pickupPosition == null) return;
+    final lat = widget.pickupPosition!.latitude;
+    final lng = widget.pickupPosition!.longitude;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTheme.brandSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLg)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: FutureBuilder<List<FavoriteDriverModel>>(
+              future: _fetchFavoriteDrivers(lat, lng),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const SizedBox(
+                    height: 120,
+                    child: Center(
+                      child: CircularProgressIndicator(color: AppTheme.primaryColor),
+                    ),
+                  );
+                }
+                final drivers = snapshot.data ?? [];
+                if (drivers.isEmpty) {
+                  return SizedBox(
+                    height: 120,
+                    child: Center(
+                      child: Text(
+                        'Henüz favori sürücün yok.\nProfil ekranından ekleyebilirsin.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ),
+                  );
+                }
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Favori Sürücülerim',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white.withValues(alpha: 0.95),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...drivers.map((d) => _favoriteDriverRow(sheetContext, d)),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _favoriteDriverRow(BuildContext sheetContext, FavoriteDriverModel driver) {
+    final etaText = driver.isOnline && driver.etaSeconds != null
+        ? '${(driver.etaSeconds! / 60).ceil()} dk'
+        : null;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        onTap: !driver.isOnline
+            ? () => showTopOverlayToast(
+                  sheetContext,
+                  '${driver.fullName} şu an çevrimdışı.',
+                  AppTheme.errorColor,
+                )
+            : () {
+                Navigator.pop(sheetContext);
+                _requestRide(preferredDriverId: driver.driverId);
+              },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          child: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: driver.isOnline ? Colors.green : Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  driver.fullName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white.withValues(alpha: driver.isOnline ? 0.95 : 0.55),
+                  ),
+                ),
+              ),
+              if (etaText != null)
+                Text(
+                  etaText,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primaryColor,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -413,8 +559,8 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                                   children: [
                                     Icon(
                                       selected
-                                          ? Icons.check_circle_rounded
-                                          : Icons.circle_outlined,
+                                          ? LucideIcons.circleCheck
+                                          : LucideIcons.circle,
                                       size: 18,
                                       color: selected
                                           ? AppTheme.primaryColor
@@ -475,7 +621,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.schedule_rounded,
+                            Icon(LucideIcons.clock,
                                 color: AppTheme.primaryColor, size: 18),
                             const SizedBox(width: 8),
                             Expanded(
@@ -515,7 +661,9 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                       ),
                     ],
                   ],
-                  SizedBox(height: hasTrip ? 10 : bottomInset * 0.08),
+                  // hasTrip=false: içerik listenin sonu — sistem navigasyon
+                  // çubuğunun (3-tuş ~48dp) altında kalmasın.
+                  SizedBox(height: hasTrip ? 10 : bottomInset + 8),
                 ],
               ),
             ),
@@ -528,41 +676,65 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
               child: Padding(
                 padding: EdgeInsets.fromLTRB(14, 4, 14, 4 + bottomInset),
                 child: SizedBox(
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: _isRequesting ? null : _requestRide,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryColor,
-                      foregroundColor: AppTheme.ink,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusSm),
-                      ),
-                    ),
-                    child: _isRequesting
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: AppTheme.ink,
+                  height: 48,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _isRequesting ? null : () => _requestRide(),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryColor,
+                            foregroundColor: AppTheme.ink,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusSm),
                             ),
-                          )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.local_taxi_rounded, size: 20),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Taksim Gelsin',
-                                style: GoogleFonts.inter(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
                           ),
+                          child: _isRequesting
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: AppTheme.ink,
+                                  ),
+                                )
+                              : Text(
+                                  'Taksim Gelsin',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _isRequesting ? null : _showFavoriteDriversSheet,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryColor,
+                            side: BorderSide(color: AppTheme.primaryColor, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusSm),
+                            ),
+                          ),
+                          child: Text(
+                            'Favori Taksim Gelsin',
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                              height: 1.1,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -642,7 +814,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            Icons.history_rounded,
+                            LucideIcons.history,
                             size: 12,
                             color: Colors.white.withValues(alpha: 0.45),
                           ),
@@ -701,7 +873,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                   child: Row(
                     children: [
-                      Icon(Icons.search_rounded,
+                      Icon(LucideIcons.search,
                           color: Colors.white.withValues(alpha: 0.45),
                           size: 20),
                       const SizedBox(width: 8),
@@ -719,7 +891,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                           ),
                         ),
                       ),
-                      Icon(Icons.arrow_forward_ios_rounded,
+                      Icon(LucideIcons.chevronRight,
                           size: 11,
                           color: Colors.white.withValues(alpha: 0.35)),
                     ],
@@ -741,7 +913,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.map_rounded,
+                      LucideIcons.map,
                       color: AppTheme.primaryColor,
                       size: 18,
                     ),
@@ -786,7 +958,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
           ),
           child: Row(
             children: [
-              Icon(Icons.place_rounded,
+              Icon(LucideIcons.mapPin,
                   color: Colors.white.withValues(alpha: 0.5), size: 20),
               const SizedBox(width: 8),
               Expanded(
@@ -803,7 +975,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                   ),
                 ),
               ),
-              Icon(Icons.edit_location_alt_rounded,
+              Icon(LucideIcons.mapPinPlus,
                   size: 14, color: Colors.white.withValues(alpha: 0.4)),
             ],
           ),
@@ -840,15 +1012,21 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.circle,
-                        size: 8, color: Colors.white.withValues(alpha: 0.5)),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                     Container(
                       width: 1.5,
                       height: 16,
                       margin: const EdgeInsets.symmetric(vertical: 2),
                       color: AppTheme.brandBorderSubtle,
                     ),
-                    Icon(Icons.location_on_rounded,
+                    Icon(LucideIcons.mapPin,
                         size: 14, color: AppTheme.primaryColor),
                   ],
                 ),
@@ -886,7 +1064,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.edit_rounded,
+                  Icon(LucideIcons.pencil,
                       size: 13, color: AppTheme.primaryColor),
                   const SizedBox(width: 3),
                   Text(
@@ -901,7 +1079,7 @@ class _RideBottomSheetState extends ConsumerState<RideBottomSheet> {
               ),
               IconButton(
                 onPressed: widget.onClearDropoff,
-                icon: Icon(Icons.close_rounded,
+                icon: Icon(LucideIcons.x,
                     size: 16, color: Colors.white.withValues(alpha: 0.55)),
                 padding: const EdgeInsets.only(left: 4),
                 constraints: const BoxConstraints(),

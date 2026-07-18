@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -135,7 +136,7 @@ class _DestinationSearchScreenState
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+          icon: const Icon(LucideIcons.chevronLeft,
               color: AppTheme.ink, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
@@ -183,10 +184,10 @@ class _DestinationSearchScreenState
                       fontWeight: FontWeight.w500,
                     ),
                     prefixIcon:
-                        Icon(Icons.search_rounded, color: AppTheme.textMuted),
+                        Icon(LucideIcons.search, color: AppTheme.textMuted),
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
-                            icon: Icon(Icons.close_rounded,
+                            icon: Icon(LucideIcons.x,
                                 color: AppTheme.textMuted, size: 22),
                             onPressed: () {
                               _searchController.clear();
@@ -249,7 +250,7 @@ class _DestinationSearchScreenState
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off_rounded, size: 48, color: AppTheme.textMuted),
+            Icon(LucideIcons.searchX, size: 48, color: AppTheme.textMuted),
             const SizedBox(height: 12),
             Text(
               'Sonuç yok',
@@ -300,7 +301,7 @@ class _DestinationSearchScreenState
                         const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
                     child: Row(
                       children: [
-                        Icon(Icons.history_rounded,
+                        Icon(LucideIcons.history,
                             color: AppTheme.textSecondary, size: 22),
                         const SizedBox(width: 14),
                         Expanded(
@@ -332,7 +333,7 @@ class _DestinationSearchScreenState
                             ],
                           ),
                         ),
-                        Icon(Icons.chevron_right_rounded,
+                        Icon(LucideIcons.chevronRight,
                             color: AppTheme.textMuted, size: 22),
                       ],
                     ),
@@ -353,10 +354,10 @@ class _DestinationSearchScreenState
           ),
         ),
         const SizedBox(height: 10),
-        _quickRow('Kırıkkale Otogar', Icons.directions_bus_rounded),
-        _quickRow('Kırıkkale Üniversitesi', Icons.school_rounded),
-        _quickRow('Kırıkkale Devlet Hastanesi', Icons.local_hospital_rounded),
-        _quickRow('Big Center AVM', Icons.shopping_bag_outlined),
+        _quickRow('Kırıkkale Otogar', LucideIcons.bus),
+        _quickRow('Kırıkkale Üniversitesi', LucideIcons.school),
+        _quickRow('Kırıkkale Devlet Hastanesi', LucideIcons.hospital),
+        _quickRow('Big Center AVM', LucideIcons.shoppingBag),
       ],
     );
   }
@@ -404,7 +405,7 @@ class _DestinationSearchScreenState
           borderRadius: BorderRadius.circular(AppTheme.radiusSm),
           border: Border.all(color: AppTheme.border),
         ),
-        child: const Icon(Icons.place_outlined, color: AppTheme.ink, size: 22),
+        child: const Icon(LucideIcons.mapPin, color: AppTheme.ink, size: 22),
       ),
       title: Text(
         title,

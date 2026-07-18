@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -15,6 +16,7 @@ import '../../models/driver_info_model.dart';
 import '../../providers/providers.dart';
 import '../../services/directions_service.dart';
 import '../../services/driver_push_registration.dart';
+import '../../services/chat_push_open.dart';
 import '../../services/ride_match_sound.dart';
 import '../../services/ride_session_sync.dart';
 import '../../core/widgets/map_fab.dart';
@@ -130,6 +132,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       DriverPushRegistration.ensureRegisteredForCustomer(ref);
     });
+    ChatPushOpen.install(ref);
     WidgetsBinding.instance.addObserver(this);
     _directionsService = DirectionsService(AppConstants.googleMapsApiKey);
     _getCurrentLocation();
@@ -211,16 +214,26 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
   /// Varış seçiliyken biniş/varış düzenleme arayüzü açık mı (kompakt özetin tersi).
   bool _tripEditorExpanded = false;
 
+  /// Android 3-tuş navigasyonunda sistem çubuğu sheet'in altını örtüyor —
+  /// kesir tabanlı yüksekliklere çubuk payı ekle (gesture nav'da ~0).
+  double get _bookSheetNavExtra {
+    final h = MediaQuery.sizeOf(context).height;
+    return h > 0 ? MediaQuery.paddingOf(context).bottom / h : 0;
+  }
+
   /// Kompakt özet hedefi — rota alternatifi sayısı arttıkça (rota kartları için) biraz büyür.
   double get _bookSheetCompactTripTarget {
     final extra = (_routeAlternatives.length - 1).clamp(0, 4);
     final size = _bookSheetCompactTripSize + extra * _bookSheetCompactTripPerAlternative;
-    return size > _bookSheetCompactTripMax ? _bookSheetCompactTripMax : size;
+    return (size > _bookSheetCompactTripMax ? _bookSheetCompactTripMax : size) +
+        _bookSheetNavExtra;
   }
 
   double _extentForMapBottomInset() {
     var e = _sheetExtent;
-    final floor = _tripEditorExpanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget;
+    final floor = _tripEditorExpanded
+        ? _bookSheetEditingSize + _bookSheetNavExtra
+        : _bookSheetCompactTripTarget;
     if (_routeAlternatives.isNotEmpty && _mapBottomInsetAtLeastExpanded) {
       if (e < floor) e = floor;
     }
@@ -254,7 +267,9 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!_bookSheetController.isAttached) return;
-      final target = _tripEditorExpanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget;
+      final target = _tripEditorExpanded
+          ? _bookSheetEditingSize + _bookSheetNavExtra
+          : _bookSheetCompactTripTarget;
       _bookSheetController.animateTo(
         target,
         duration: const Duration(milliseconds: 360),
@@ -268,7 +283,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
       if (!mounted) return;
       if (!_bookSheetController.isAttached) return;
       _bookSheetController.animateTo(
-        _bookSheetInitialSize,
+        _bookSheetInitialSize + _bookSheetNavExtra,
         duration: const Duration(milliseconds: 280),
         curve: Curves.easeOutCubic,
       );
@@ -283,7 +298,9 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
       if (!mounted) return;
       if (!_bookSheetController.isAttached) return;
       _bookSheetController.animateTo(
-        expanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget,
+        expanded
+            ? _bookSheetEditingSize + _bookSheetNavExtra
+            : _bookSheetCompactTripTarget,
         duration: const Duration(milliseconds: 280),
         curve: Curves.easeOutCubic,
       );
@@ -810,7 +827,9 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
         ..clear()
         ..addAll(routes);
       _selectedRouteIndex = 0;
-      _sheetExtent = _tripEditorExpanded ? _bookSheetEditingSize : _bookSheetCompactTripTarget;
+      _sheetExtent = _tripEditorExpanded
+          ? _bookSheetEditingSize + _bookSheetNavExtra
+          : _bookSheetCompactTripTarget;
       _mapBottomInsetAtLeastExpanded = true;
     });
     _applyMapPolylines();
@@ -1094,7 +1113,7 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
                 ),
                 const Spacer(),
                 MapFab(
-                  icon: Icons.my_location_rounded,
+                  icon: LucideIcons.locate,
                   tooltip: 'Konumuma git',
                   minimalStyle: true,
                   onTap: () {
@@ -1149,14 +1168,14 @@ class _CustomerHomeScreenState extends ConsumerState<CustomerHomeScreen>
                       key: const ValueKey<String>('book'),
                       child: DraggableScrollableSheet(
                         controller: _bookSheetController,
-                        initialChildSize: _bookSheetInitialSize,
-                        minChildSize: 0.29,
+                        initialChildSize: _bookSheetInitialSize + _bookSheetNavExtra,
+                        minChildSize: 0.29 + _bookSheetNavExtra,
                         maxChildSize: 0.88,
                         snap: true,
                         snapSizes: <double>[
-                          _bookSheetInitialSize,
+                          _bookSheetInitialSize + _bookSheetNavExtra,
                           _bookSheetCompactTripTarget,
-                          _bookSheetEditingSize,
+                          _bookSheetEditingSize + _bookSheetNavExtra,
                           0.88,
                         ],
                         expand: false,

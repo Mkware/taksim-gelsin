@@ -231,6 +231,8 @@ class CurrentUserNotifier extends StateNotifier<UserModel?> {
       if (driver is Map && userMap['role'] == 'driver') {
         final b = driver['balance'];
         if (b != null) userMap['balance_tcoin'] = b;
+        final code = driver['driver_code'];
+        if (code != null) userMap['driver_code'] = code;
         _ref.read(isDriverOnlineProvider.notifier).state =
             driver['is_online'] == true;
       }
@@ -437,6 +439,49 @@ final pendingRideRequestProvider = StateProvider<Map<String, dynamic>?>((ref) =>
 /// FCM `ride_new_request` — [DriverHomeScreen] dinleyip dialog açar
 final driverPendingFcmRideRequestProvider =
     StateProvider<Map<String, dynamic>?>((ref) => null);
+
+// ============================================================
+// SOHBET (aktif yolculuk mesajlaşması)
+// ============================================================
+
+/// Sohbet paneli açık mı — açıkken gelen mesajlar okunmamış sayılmaz.
+final rideChatSheetOpenProvider = StateProvider<bool>((ref) => false);
+
+/// FCM `new_message` bildirimine tıklanınca açılacak sohbetin rideId'si —
+/// aktif yolculuk paneli (sürücü/müşteri) dinleyip sheet'i açar.
+final pendingChatOpenRideIdProvider = StateProvider<String?>((ref) => null);
+
+/// Okunmamış sohbet mesajı sayısı — mesaj ikonundaki rozet.
+final chatUnreadCountProvider =
+    StateNotifierProvider<ChatUnreadNotifier, int>((ref) {
+  final notifier = ChatUnreadNotifier(ref);
+  // Yolculuk bitince/temizlenince rozet de sıfırlanır.
+  ref.listen<RideModel?>(activeRideProvider, (prev, next) {
+    if (next == null) notifier.clear();
+  });
+  return notifier;
+});
+
+class ChatUnreadNotifier extends StateNotifier<int> {
+  ChatUnreadNotifier(this._ref) : super(0) {
+    _sub = _ref.read(socketServiceProvider).onNewMessage.listen((data) {
+      if (data['senderId'] == _ref.read(currentUserProvider)?.id) return;
+      if (_ref.read(rideChatSheetOpenProvider)) return;
+      state = state + 1;
+    });
+  }
+
+  final Ref _ref;
+  StreamSubscription<Map<String, dynamic>>? _sub;
+
+  void clear() => state = 0;
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+}
 
 // ============================================================
 // UI STATE

@@ -83,16 +83,14 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- iPad'de yalnızca dikey destekleyebilmek için multitasking kapalı olmalı -->
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<!-- Firebase Phone Auth (reCAPTCHA geri dönüşü): GOOGLE_APP_ID içindeki ':' -> '-' ile app-... şeması -->
 	<key>CFBundleURLTypes</key>
 	<array>

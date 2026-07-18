@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_constants.dart';
 
@@ -191,7 +192,7 @@ class _RideRequestDialogState extends State<RideRequestDialog> {
                           ),
                         ),
                         const Spacer(),
-                        const Icon(Icons.payments_outlined,
+                        const Icon(LucideIcons.banknote,
                             size: 22, color: Colors.white),
                         const SizedBox(width: 8),
                         Text(
@@ -211,7 +212,7 @@ class _RideRequestDialogState extends State<RideRequestDialog> {
                     ),
                     const SizedBox(height: 6),
                     _stepLine(
-                      icon: Icons.person_pin_circle_rounded,
+                      icon: LucideIcons.mapPin,
                       iconColor: const Color(0xFF22C55E),
                       title: pickupEtaText,
                       subtitle: pickupAddress,
@@ -225,7 +226,7 @@ class _RideRequestDialogState extends State<RideRequestDialog> {
                       ),
                     ),
                     _stepLine(
-                      icon: Icons.looks_one_rounded,
+                      icon: LucideIcons.route,
                       iconColor: const Color(0xFF22C55E),
                       title: distanceKm != null
                           ? '${distanceKm.toStringAsFixed(1)} km uzaklıkta'
@@ -241,7 +242,7 @@ class _RideRequestDialogState extends State<RideRequestDialog> {
                       ),
                     ),
                     _stepLine(
-                      icon: Icons.location_on,
+                      icon: LucideIcons.mapPin,
                       iconColor: Colors.white,
                       title: dropoffEtaText,
                       subtitle: dropoffAddress,

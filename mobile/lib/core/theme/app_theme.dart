@@ -117,7 +117,7 @@ class AppTheme {
   // TEMA
   // ============================================================
   static ThemeData get lightTheme {
-    final base = GoogleFonts.poppinsTextTheme();
+    final base = GoogleFonts.interTextTheme();
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
@@ -162,7 +162,7 @@ class AppTheme {
         elevation: 6,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
         backgroundColor: ink,
-        contentTextStyle: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w500),
+        contentTextStyle: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w500),
       ),
       dialogTheme: DialogThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusXl)),
@@ -189,7 +189,7 @@ class AppTheme {
           statusBarIconBrightness: Brightness.dark,
           statusBarBrightness: Brightness.light,
         ),
-        titleTextStyle: GoogleFonts.poppins(
+        titleTextStyle: GoogleFonts.inter(
           fontSize: 18,
           fontWeight: FontWeight.w700,
           color: ink,
@@ -204,7 +204,7 @@ class AppTheme {
           shadowColor: Colors.transparent,
           minimumSize: const Size(double.infinity, 56),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
-          textStyle: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 0.2),
+          textStyle: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 0.2),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -213,13 +213,13 @@ class AppTheme {
           minimumSize: const Size(double.infinity, 54),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
           side: const BorderSide(color: border, width: 1.4),
-          textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+          textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: ink,
-          textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+          textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -247,8 +247,8 @@ class AppTheme {
           borderRadius: BorderRadius.circular(radiusMd),
           borderSide: const BorderSide(color: errorColor, width: 2),
         ),
-        labelStyle: GoogleFonts.poppins(color: textSecondary, fontSize: 14, fontWeight: FontWeight.w500),
-        hintStyle: GoogleFonts.poppins(color: textMuted, fontSize: 14),
+        labelStyle: GoogleFonts.inter(color: textSecondary, fontSize: 14, fontWeight: FontWeight.w500),
+        hintStyle: GoogleFonts.inter(color: textMuted, fontSize: 14),
         prefixIconColor: textSecondary,
         suffixIconColor: textSecondary,
       ),
@@ -267,7 +267,7 @@ class AppTheme {
         side: BorderSide.none,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusSm)),
-        labelStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: ink),
+        labelStyle: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: ink),
       ),
       iconTheme: const IconThemeData(color: ink, size: 24),
       iconButtonTheme: IconButtonThemeData(

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/animated_entry.dart';
 import '../../core/widgets/glass_card.dart';
@@ -60,7 +62,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 AnimatedEntry(
                   order: 1,
                   child: _MenuTile(
-                    icon: Icons.person_outline_rounded,
+                    icon: LucideIcons.user,
                     title: 'Profili Düzenle',
                     subtitle: 'Kişisel bilgilerinizi güncelleyin',
                     color: AppTheme.primaryColor,
@@ -73,7 +75,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   AnimatedEntry(
                     order: 3,
                     child: _MenuTile(
-                      icon: Icons.account_balance_wallet_rounded,
+                      icon: LucideIcons.wallet,
                       title: 'T Coin cüzdanım',
                       subtitle: 'Bakiye görüntüle ve yükleme talebi',
                       color: AppTheme.primaryDark,
@@ -84,22 +86,51 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   AnimatedEntry(
                     order: 4,
                     child: _MenuTile(
-                      icon: Icons.history_rounded,
+                      icon: LucideIcons.history,
                       title: 'Yolculuk Geçmişi',
                       subtitle: 'Tamamlanan ve iptal olan yolculuklar',
                       color: AppTheme.info,
                       onTap: () => context.push('/customer/history'),
                     ),
                   ),
+                  if ((user?.driverCode ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    AnimatedEntry(
+                      order: 5,
+                      child: _MenuTile(
+                        icon: LucideIcons.share2,
+                        title: 'Sürücü Numaram: ${user!.driverCode}',
+                        subtitle: 'Müşterilerle paylaşmak için dokun',
+                        color: AppTheme.success,
+                        onTap: () {
+                          SharePlus.instance.share(ShareParams(
+                            text: 'Taksim Gelsin\'de beni favori sürücün olarak ekle 🚕\n'
+                                'Sürücü numaram: ${user.driverCode}',
+                          ));
+                        },
+                      ),
+                    ),
+                  ],
                 ] else ...[
                   AnimatedEntry(
                     order: 2,
                     child: _MenuTile(
-                      icon: Icons.history_rounded,
+                      icon: LucideIcons.history,
                       title: 'Yolculuk Geçmişi',
                       subtitle: 'Geçmiş yolculukların ve fişler',
                       color: AppTheme.info,
                       onTap: () => context.push('/customer/history'),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  AnimatedEntry(
+                    order: 3,
+                    child: _MenuTile(
+                      icon: LucideIcons.heart,
+                      title: 'Favori Sürücülerim',
+                      subtitle: 'Bildiğin sürücüleri favorile, tek dokunuşla çağır',
+                      color: AppTheme.errorColor,
+                      onTap: () => context.push('/customer/favorite-drivers'),
                     ),
                   ),
                 ],
@@ -108,7 +139,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 AnimatedEntry(
                   order: 4,
                   child: _MenuTile(
-                    icon: Icons.notifications_none_rounded,
+                    icon: LucideIcons.bell,
                     title: 'Bildirimler',
                     subtitle: 'İzinler ve sesli uyarılar',
                     color: AppTheme.warning,
@@ -125,7 +156,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 AnimatedEntry(
                   order: 7,
                   child: _MenuTile(
-                    icon: Icons.gavel_rounded,
+                    icon: LucideIcons.gavel,
                     title: 'Yasal ve gizlilik',
                     subtitle: 'KVKK, gizlilik politikası, kullanım koşulları',
                     color: AppTheme.ink,
@@ -148,7 +179,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                       ),
                     ),
-                    icon: const Icon(Icons.logout_rounded),
+                    icon: const Icon(LucideIcons.logOut),
                     label: const Text(
                       'Çıkış Yap',
                       style: TextStyle(fontWeight: FontWeight.w700),
@@ -215,7 +246,7 @@ class _Header extends StatelessWidget {
           child: Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                icon: const Icon(LucideIcons.chevronLeft,
                     color: Colors.white),
                 onPressed: () => Navigator.of(context).maybePop(),
               ),
@@ -265,7 +296,7 @@ class _StatsRow extends StatelessWidget {
       children: [
         Expanded(
           child: _StatTile(
-            icon: Icons.star_rounded,
+            icon: LucideIcons.star,
             value: ratingLabel,
             label: 'Ort. puan',
             color: AppTheme.primaryColor,
@@ -274,7 +305,7 @@ class _StatsRow extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: _StatTile(
-            icon: Icons.verified_rounded,
+            icon: LucideIcons.badgeCheck,
             value: memberYear,
             label: 'Üyelik',
             color: AppTheme.success,
@@ -430,7 +461,7 @@ class _MenuTile extends StatelessWidget {
             ),
           ),
           const Icon(
-            Icons.arrow_forward_ios_rounded,
+            LucideIcons.chevronRight,
             size: 16,
             color: AppTheme.textMuted,
           ),

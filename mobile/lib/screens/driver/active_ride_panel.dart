@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -30,6 +31,21 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
       ..addListener(() {
         if (mounted) setState(() {});
       });
+    // Bildirime tıklanarak gelindiyse sohbeti aç (panel mount olduğunda ride hazır).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenPendingChat());
+  }
+
+  void _maybeOpenPendingChat() {
+    if (!mounted) return;
+    final pending = ref.read(pendingChatOpenRideIdProvider);
+    if (pending == null || pending != widget.ride.id) return;
+    ref.read(pendingChatOpenRideIdProvider.notifier).state = null;
+    showRideChatSheet(
+      context,
+      ref: ref,
+      rideId: widget.ride.id,
+      peerName: _customerInitials(widget.ride.customerName),
+    );
   }
 
   @override
@@ -70,6 +86,26 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
   }
 
   Future<void> _callEmergency() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('112 Acil Servisi aranıyor'),
+        content: const Text('112 Acil Servisi\'ni aramak istediğinizden emin misiniz?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.errorColor),
+            child: const Text('Ara'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
     final ok = await launchUrl(Uri.parse('tel:112'));
     if (!ok && mounted) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
@@ -80,6 +116,10 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(pendingChatOpenRideIdProvider, (prev, next) {
+      if (next == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOpenPendingChat());
+    });
     final ride = widget.ride;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     const double edge = 12;
@@ -171,7 +211,7 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
               ),
             ),
             Spacer(),
-            Icon(Icons.payments_outlined, size: 20, color: Colors.white),
+            Icon(LucideIcons.banknote, size: 20, color: Colors.white),
             SizedBox(width: 8),
             Text(
               'Nakit',
@@ -211,7 +251,7 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
           children: [
             const Padding(
               padding: EdgeInsets.only(top: 2),
-              child: Icon(Icons.location_on, color: Colors.white, size: 34),
+              child: Icon(LucideIcons.mapPin, color: Colors.white, size: 34),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -254,7 +294,7 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
                   height: 42,
                   child: OutlinedButton.icon(
                     onPressed: () => _callPhone(customerPhone),
-                    icon: const Icon(Icons.call_rounded, size: 18),
+                    icon: const Icon(LucideIcons.phone, size: 18),
                     label: const Text(
                       'Ara',
                       style: TextStyle(fontWeight: FontWeight.w700),
@@ -277,10 +317,16 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
                 child: OutlinedButton.icon(
                   onPressed: () => showRideChatSheet(
                     context,
+                    ref: ref,
                     rideId: ride.id,
                     peerName: _customerInitials(ride.customerName),
                   ),
-                  icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                  icon: Badge(
+                    isLabelVisible: ref.watch(chatUnreadCountProvider) > 0,
+                    label: Text('${ref.watch(chatUnreadCountProvider)}'),
+                    backgroundColor: AppTheme.errorColor,
+                    child: const Icon(LucideIcons.messageCircle, size: 18),
+                  ),
                   label: const Text(
                     'Mesaj',
                     style: TextStyle(fontWeight: FontWeight.w700),
@@ -462,7 +508,7 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
                     height: 44,
                     child: OutlinedButton.icon(
                       onPressed: () => _cancelRide(context, ref, ride),
-                      icon: const Icon(Icons.cancel_rounded, size: 18),
+                      icon: const Icon(LucideIcons.circleX, size: 18),
                       label: const Text(
                         'Yolculuğu İptal Et',
                         style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
@@ -479,17 +525,19 @@ class _ActiveRidePanelState extends ConsumerState<ActiveRidePanel> {
                 ),
                 const SizedBox(width: 10),
                 SizedBox(
+                  width: 76,
                   height: 44,
                   child: OutlinedButton.icon(
                     onPressed: _callEmergency,
-                    icon: const Icon(Icons.emergency_rounded, size: 18),
+                    icon: const Icon(LucideIcons.siren, size: 18),
                     label: const Text(
-                      '112',
+                      'SOS',
                       style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
                     ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFFFCA5A5),
                       side: const BorderSide(color: Color(0xFFB91C1C), width: 1.2),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                       ),

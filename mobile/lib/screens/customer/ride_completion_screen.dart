@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/top_overlay_toast.dart';
@@ -87,10 +89,10 @@ class _RideCompletionScreenState extends ConsumerState<RideCompletionScreen> {
                 alignment: Alignment.centerRight,
                 child: IconButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close_rounded),
+                  icon: const Icon(LucideIcons.x),
                 ),
               ),
-              const Icon(Icons.check_circle_rounded, color: AppTheme.accentColor, size: 56),
+              const Icon(LucideIcons.circleCheck, color: AppTheme.accentColor, size: 56),
               const SizedBox(height: 8),
               Text(
                 'Yolculuk tamamlandı',
@@ -117,7 +119,7 @@ class _RideCompletionScreenState extends ConsumerState<RideCompletionScreen> {
                   Expanded(
                     child: _PaymentChip(
                       label: 'Nakit',
-                      icon: Icons.payments_outlined,
+                      icon: LucideIcons.banknote,
                       selected: _cash,
                       onTap: () => setState(() => _cash = true),
                     ),
@@ -126,7 +128,7 @@ class _RideCompletionScreenState extends ConsumerState<RideCompletionScreen> {
                   Expanded(
                     child: _PaymentChip(
                       label: 'Kart',
-                      icon: Icons.credit_card_rounded,
+                      icon: LucideIcons.creditCard,
                       selected: !_cash,
                       onTap: () => setState(() => _cash = false),
                     ),
@@ -153,7 +155,7 @@ class _RideCompletionScreenState extends ConsumerState<RideCompletionScreen> {
                   return IconButton(
                     onPressed: () => setState(() => _rating = i + 1),
                     icon: Icon(
-                      star ? Icons.star_rounded : Icons.star_outline_rounded,
+                      star ? CupertinoIcons.star_fill : CupertinoIcons.star,
                       color: star ? AppTheme.primaryColor : AppTheme.dividerColor,
                       size: 40,
                     ),
@@ -216,16 +218,16 @@ class _SummaryCard extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: _MiniStat(icon: Icons.route_rounded, label: 'Mesafe', value: distance),
+            child: _MiniStat(icon: LucideIcons.route, label: 'Mesafe', value: distance),
           ),
           Container(width: 1, height: 44, color: AppTheme.dividerColor),
           Expanded(
-            child: _MiniStat(icon: Icons.schedule_rounded, label: 'Süre', value: duration),
+            child: _MiniStat(icon: LucideIcons.clock, label: 'Süre', value: duration),
           ),
           Container(width: 1, height: 44, color: AppTheme.dividerColor),
           Expanded(
             child: _MiniStat(
-              icon: Icons.payments_rounded,
+              icon: LucideIcons.banknote,
               label: 'Tutar',
               value: amountLabel,
               emphasize: true,

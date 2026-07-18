@@ -16,6 +16,8 @@ class UserModel {
   final String? createdAt;
   /// Sürücü T Coin bakiyesi (`drivers.balance`). Müşteri hesabında anlamı yok.
   final double? balanceTcoin;
+  /// Sürücünün benzersiz favori-çağırma kodu (`drivers.driver_code`). Müşteri hesabında anlamı yok.
+  final String? driverCode;
 
   const UserModel({
     required this.id,
@@ -31,6 +33,7 @@ class UserModel {
     this.rejectedPer100,
     this.createdAt,
     this.balanceTcoin,
+    this.driverCode,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -82,6 +85,7 @@ class UserModel {
           : null,
       createdAt: (json['created_at'] ?? json['createdAt']) as String?,
       balanceTcoin: _asDoubleOpt(json['balance_tcoin'] ?? json['balanceTcoin']),
+      driverCode: json['driver_code'] as String? ?? json['driverCode'] as String?,
     );
   }
 
@@ -100,6 +104,7 @@ class UserModel {
       'rejected_per_100': rejectedPer100,
       'created_at': createdAt,
       'balance_tcoin': balanceTcoin,
+      'driver_code': driverCode,
     };
   }
 
@@ -116,6 +121,7 @@ class UserModel {
     double? rejectionRate,
     int? rejectedPer100,
     double? balanceTcoin,
+    String? driverCode,
   }) {
     return UserModel(
       id: id,
@@ -131,6 +137,7 @@ class UserModel {
       rejectedPer100: rejectedPer100 ?? this.rejectedPer100,
       createdAt: createdAt,
       balanceTcoin: balanceTcoin ?? this.balanceTcoin,
+      driverCode: driverCode ?? this.driverCode,
     );
   }
 }

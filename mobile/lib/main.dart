@@ -44,6 +44,8 @@ void _installFontDiskCacheErrorFilter() {
 Future<void> main() async {
   await runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
+    // Yalnızca dikey — harita/yolculuk ekranları yatay için tasarlanmadı.
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);

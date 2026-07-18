@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
@@ -116,7 +117,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     controller: _nameController,
                     decoration: const InputDecoration(
                       labelText: 'Ad Soyad',
-                      prefixIcon: Icon(Icons.person_outline_rounded),
+                      prefixIcon: Icon(LucideIcons.user),
                     ),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) {
@@ -130,7 +131,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                     controller: _phoneController,
                     decoration: const InputDecoration(
                       labelText: 'Telefon Numarası',
-                      prefixIcon: Icon(Icons.phone_outlined),
+                      prefixIcon: Icon(LucideIcons.phone),
                     ),
                     enabled: false, // Telefon numarası genelde değiştirilemez
                   ),
@@ -168,7 +169,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                   borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                 ),
               ),
-              icon: const Icon(Icons.delete_outline_rounded),
+              icon: const Icon(LucideIcons.trash2),
               label: const Text(
                 'Hesabı Sil',
                 style: TextStyle(fontWeight: FontWeight.w700),

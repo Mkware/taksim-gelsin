@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:lottie/lottie.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -127,7 +128,7 @@ class _CenterTaxiBadge extends StatelessWidget {
               ],
             ),
             child: Icon(
-              Icons.local_taxi_rounded,
+              LucideIcons.carTaxiFront,
               size: 30,
               color: AppTheme.primaryDark,
             ),

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/theme/app_theme.dart';
@@ -36,6 +39,7 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
   final _seenIds = <String>{};
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  final _subs = <StreamSubscription<void>>[];
   bool _loadingHistory = true;
 
   @override
@@ -43,7 +47,7 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
     super.initState();
     final socket = ref.read(socketServiceProvider);
 
-    socket.onMessageHistory.listen((data) {
+    _subs.add(socket.onMessageHistory.listen((data) {
       if (!mounted || data['rideId'] != widget.rideId) return;
       final list = (data['messages'] as List?) ?? const [];
       setState(() {
@@ -53,13 +57,19 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
         }
       });
       _scrollToBottomSoon();
-    });
+    }));
 
-    socket.onNewMessage.listen((data) {
+    _subs.add(socket.onNewMessage.listen((data) {
       if (!mounted || data['rideId'] != widget.rideId) return;
       setState(() => _addMessage(data));
       _scrollToBottomSoon();
-    });
+    }));
+
+    // Soğuk başlangıçta (bildirimden açılış) socket henüz bağlanmamış olabilir —
+    // bağlantı kurulunca geçmişi yeniden iste; mesajlar id ile dedupe ediliyor.
+    _subs.add(socket.onConnected.listen((_) {
+      if (mounted) socket.getMessageHistory(widget.rideId);
+    }));
 
     socket.getMessageHistory(widget.rideId);
     Future<void>.delayed(const Duration(seconds: 5), () {
@@ -93,6 +103,9 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
 
   @override
   void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -142,7 +155,7 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(
         children: [
-          const Icon(Icons.chat_bubble_rounded, color: AppTheme.primaryColor, size: 20),
+          const Icon(LucideIcons.messageCircle, color: AppTheme.primaryColor, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -154,7 +167,7 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
           ),
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
-            icon: const Icon(Icons.close_rounded),
+            icon: const Icon(LucideIcons.x),
           ),
         ],
       ),
@@ -276,7 +289,7 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
           const SizedBox(width: 8),
           IconButton.filled(
             onPressed: _send,
-            icon: const Icon(Icons.send_rounded, size: 20),
+            icon: const Icon(LucideIcons.send, size: 20),
             style: IconButton.styleFrom(
               backgroundColor: AppTheme.primaryColor,
               foregroundColor: AppTheme.ink,
@@ -289,15 +302,22 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
 }
 
 /// Sohbet panelini modal bottom sheet olarak açar.
+/// Açıkken gelen mesajlar okunmamış sayılmaz; kapanınca rozet sıfırlanır.
 Future<void> showRideChatSheet(
   BuildContext context, {
+  required WidgetRef ref,
   required String rideId,
   required String peerName,
 }) {
+  ref.read(rideChatSheetOpenProvider.notifier).state = true;
+  ref.read(chatUnreadCountProvider.notifier).clear();
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     builder: (_) => RideChatSheet(rideId: rideId, peerName: peerName),
-  );
+  ).whenComplete(() {
+    ref.read(rideChatSheetOpenProvider.notifier).state = false;
+    ref.read(chatUnreadCountProvider.notifier).clear();
+  });
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -16,6 +17,7 @@ import '../../providers/providers.dart';
 import '../../services/directions_service.dart';
 import '../../services/driver_push_registration.dart';
 import '../../services/driver_ride_request_fcm.dart';
+import '../../services/chat_push_open.dart';
 import '../../services/ride_match_sound.dart';
 import '../../services/ride_session_sync.dart';
 import '../review/rate_ride_screen.dart';
@@ -145,6 +147,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
     _getCurrentLocation();
     _setupSocketListeners();
     DriverRideRequestFcm.install(ref);
+    ChatPushOpen.install(ref);
     // Socket henüz hazır değilken REST ile de restore dene
     _restoreActiveRideFromApi();
   }
@@ -996,7 +999,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded, color: Colors.white, size: 18),
+                  const Icon(LucideIcons.info, color: Colors.white, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -1281,7 +1284,7 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
 
         // Konuma odaklan
         _circleButton(
-          icon: Icons.my_location_rounded,
+          icon: LucideIcons.locate,
           isOnline: isOnline,
           onTap: () {
             _mapController?.animateCamera(
@@ -1390,8 +1393,8 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
                     ),
                     child: Icon(
                       isOnline
-                          ? Icons.wifi_rounded
-                          : Icons.nightlight_round,
+                          ? LucideIcons.wifi
+                          : LucideIcons.moon,
                       size: 20,
                       color: isOnline ? AppTheme.success : _textOnDarkMuted,
                     ),
@@ -1570,7 +1573,7 @@ class _OnlineToggleButton extends StatelessWidget {
                     transitionBuilder: (c, a) =>
                         ScaleTransition(scale: a, child: FadeTransition(opacity: a, child: c)),
                     child: Icon(
-                      isOnline ? Icons.pause_rounded : Icons.bolt_rounded,
+                      isOnline ? LucideIcons.pause : LucideIcons.zap,
                       key: ValueKey(isOnline),
                       color: Colors.white,
                       size: 22,
