@@ -4,6 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { supabaseAdmin } from '../../config/supabase';
 import { drivingMetersAndSecondsDriverToPickup } from '../../services/driving_distance.service';
@@ -116,7 +117,19 @@ router.delete('/me/push-token', async (req: Request, res: Response) => {
 
 // ─── Favori sürücüler (favori sürücü çağırma) ─────────────────────────────
 
-const DRIVER_CODE_RE = /^\d{4}$/;
+const DRIVER_CODE_RE = /^\d{6}$/;
+
+// Sürücü numarası (driver_code) brute-force koruması — bkz. driver.routes.ts'deki eşleniği.
+const favoriteDriverAddLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Çok fazla deneme. Lütfen bir dakika bekleyin.',
+  },
+});
 
 /** Favori sürücüleri getir — çevrimiçi olanlar için (lat/lng verilmişse) ETA hesaplanır. */
 router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
@@ -219,7 +232,7 @@ router.get('/me/favorite-drivers', async (req: Request, res: Response) => {
 });
 
 /** Favori sürücü ekle — sürücü numarasıyla (maks. 3, telefon numarası kullanılmaz). */
-router.post('/me/favorite-drivers', async (req: Request, res: Response) => {
+router.post('/me/favorite-drivers', favoriteDriverAddLimiter, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
     const code = typeof req.body?.driver_code === 'string' ? req.body.driver_code.trim() : '';
