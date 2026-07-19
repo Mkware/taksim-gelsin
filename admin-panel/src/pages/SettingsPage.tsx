@@ -143,6 +143,18 @@ function PlatformSettingsSection() {
           value={form.matchingTimeoutBanSeconds ?? 600}
           onChange={(v) => setForm({ ...form, matchingTimeoutBanSeconds: Number(v) || 0 })}
         />
+        <TextInput
+          label="Minimum uygulama sürümü"
+          description={'Bu sürümün altındaki uygulamalar zorunlu güncelleme ekranına kilitlenir. "0.0.0" = kapalı. Biçim: 1.2.3'}
+          placeholder="0.0.0"
+          error={
+            /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test((form.minSupportedAppVersion ?? '0.0.0').trim())
+              ? undefined
+              : 'Biçim 1.2.3 olmalı'
+          }
+          value={form.minSupportedAppVersion ?? '0.0.0'}
+          onChange={(e) => setForm({ ...form, minSupportedAppVersion: e.currentTarget.value })}
+        />
       </SimpleGrid>
       <Title order={5} mt="lg" mb="xs">
         Taksi Tarifesi

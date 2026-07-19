@@ -11,6 +11,13 @@ const ROW_ID = 'default';
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
+/** "1.2.3" biçiminde sürüm — geçersizse fallback. '0.0.0' = zorunlu güncelleme kapalı. */
+const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
+const ver = (v: unknown, fallback: string): string => {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return VERSION_RE.test(s) ? s : fallback;
+};
+
 function envDefaults(): PlatformOperationalSettings {
   return {
     rideAcceptFeePercent: Number(process.env.RIDE_ACCEPT_FEE_PERCENT ?? 7),
@@ -61,6 +68,7 @@ function envDefaults(): PlatformOperationalSettings {
     tariffPerKmRate: Number(process.env.TARIFF_PER_KM_RATE ?? 50),
     tariffMinimumFare: Number(process.env.TARIFF_MINIMUM_FARE ?? 150),
     tariffWaitingRatePerMinute: Number(process.env.TARIFF_WAITING_RATE_PER_MINUTE ?? 3),
+    minSupportedAppVersion: ver(process.env.MIN_SUPPORTED_APP_VERSION, '0.0.0'),
   };
 }
 
@@ -93,6 +101,8 @@ export type PlatformSettingsPatch = Partial<{
   tariffMinimumFare: number;
   /** Bekleme (hareketsizlik) — dakika başı (TL) */
   tariffWaitingRatePerMinute: number;
+  /** Desteklenen en düşük uygulama sürümü ("1.2.3"). Altındaki istemciler zorunlu güncelleme ekranına kilitlenir; '0.0.0' = kapalı. */
+  minSupportedAppVersion: string;
 }>;
 
 export interface PlatformOperationalSettings {
@@ -112,6 +122,7 @@ export interface PlatformOperationalSettings {
   tariffPerKmRate: number;
   tariffMinimumFare: number;
   tariffWaitingRatePerMinute: number;
+  minSupportedAppVersion: string;
 }
 
 let cache: PlatformOperationalSettings | null = null;
@@ -180,6 +191,7 @@ function mergeFromDbRow(raw: Record<string, unknown> | null | undefined): Platfo
       0,
       1_000,
     ),
+    minSupportedAppVersion: ver(raw.minSupportedAppVersion, d.minSupportedAppVersion),
   };
 }
 
@@ -301,6 +313,7 @@ export async function updatePlatformSettings(
       0,
       1_000,
     ),
+    minSupportedAppVersion: ver(patch.minSupportedAppVersion, base.minSupportedAppVersion),
   };
 
   const settingsJson = {
@@ -320,6 +333,7 @@ export async function updatePlatformSettings(
     tariffPerKmRate: next.tariffPerKmRate,
     tariffMinimumFare: next.tariffMinimumFare,
     tariffWaitingRatePerMinute: next.tariffWaitingRatePerMinute,
+    minSupportedAppVersion: next.minSupportedAppVersion,
   };
 
   const { error } = await supabaseAdmin.from('platform_settings').upsert(
@@ -350,5 +364,6 @@ export function getPublicPlatformConfig() {
     matchingRoadMatrixMaxDrivers: s.matchingRoadMatrixMaxDrivers,
     drivingDistanceCacheTtlSec: s.drivingDistanceCacheTtlSec,
     driverResponseTimeoutSeconds: s.driverResponseTimeoutSeconds,
+    minSupportedAppVersion: s.minSupportedAppVersion,
   };
 }

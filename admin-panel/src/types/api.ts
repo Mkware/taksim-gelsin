@@ -214,6 +214,8 @@ export interface PlatformSettings {
   tariffMinimumFare: number;
   /** Bekleme — dakika başı (TL) */
   tariffWaitingRatePerMinute: number;
+  /** Desteklenen en düşük uygulama sürümü ("1.2.3"). Altındaki istemciler zorunlu güncelleme ekranına kilitlenir; "0.0.0" = kapalı. */
+  minSupportedAppVersion: string;
 }
 
 export interface PricingSettings {
