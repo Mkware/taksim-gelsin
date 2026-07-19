@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -202,28 +203,39 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
   Widget _bubble({required String text, required bool isMe}) {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
-        decoration: BoxDecoration(
-          color: isMe ? AppTheme.primaryColor : AppTheme.subtle,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isMe ? 16 : 4),
-            bottomRight: Radius.circular(isMe ? 4 : 16),
+      child: GestureDetector(
+        onLongPress: () => _copyMessage(text),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.72),
+          decoration: BoxDecoration(
+            color: isMe ? AppTheme.primaryColor : AppTheme.subtle,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(isMe ? 16 : 4),
+              bottomRight: Radius.circular(isMe ? 4 : 16),
+            ),
           ),
-        ),
-        child: Text(
-          text,
-          style: GoogleFonts.inter(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w600,
-            color: isMe ? AppTheme.ink : AppTheme.textPrimary,
+          child: Text(
+            text,
+            style: GoogleFonts.inter(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: isMe ? AppTheme.ink : AppTheme.textPrimary,
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  void _copyMessage(String text) {
+    HapticFeedback.selectionClick();
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Mesaj kopyalandı'), duration: Duration(seconds: 1)),
     );
   }
 
