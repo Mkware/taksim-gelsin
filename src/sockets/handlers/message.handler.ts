@@ -29,20 +29,6 @@ type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServe
 
 const MAX_MESSAGE_LENGTH = 1000;
 
-/**
- * Alıcının bu yolculuğun room'unda canlı bir socket'i var mı — varsa `message:new`
- * zaten anlık olarak ulaşır, push bildirimi (native alert + ses) yalnızca gereksiz
- * yinelenen bildirim ve alıcı cihazda ekstra yük demektir.
- */
-function recipientHasLiveSocketInRide(io: TypedSocketServer, rideId: string, recipientId: string): boolean {
-  const socketIds = io.sockets.adapter.rooms.get(`ride:${rideId}`);
-  if (!socketIds) return false;
-  for (const socketId of socketIds) {
-    if (io.sockets.sockets.get(socketId)?.data.userId === recipientId) return true;
-  }
-  return false;
-}
-
 export function registerMessageHandlers(socket: TypedSocket, io: TypedSocketServer): void {
   const userId = socket.data.userId;
   const role = socket.data.role;
@@ -72,7 +58,7 @@ export function registerMessageHandlers(socket: TypedSocket, io: TypedSocketServ
       io.to(`ride:${rideId}`).emit('message:new', message);
 
       const recipientId = role === 'customer' ? ride.driver_id : ride.customer_id;
-      if (recipientId && !recipientHasLiveSocketInRide(io, rideId, recipientId)) {
+      if (recipientId) {
         void notifyNewMessagePush({ recipientId, rideId, senderRole: role, text }).catch((e: unknown) => {
           logger.warn(`[FCM] Mesaj push hatası [${rideId}]:`, e);
         });
