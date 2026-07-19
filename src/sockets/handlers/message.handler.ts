@@ -29,6 +29,34 @@ type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServe
 
 const MAX_MESSAGE_LENGTH = 1000;
 
+/**
+ * Metindeki rakamları (ayraçlardan bağımsız — "00 43", "kodum:0043" dahil) 4 haneli
+ * biniş PIN'ine karşı tarar; eşleşen basamakları orijinal biçimi bozmadan '*' ile değiştirir.
+ * PIN sohbet üzerinden paylaşılırsa doğrulamanın "doğru yolcu bindi mi" amacı boşa düşer.
+ */
+function censorPickupCode(text: string, code: string): string {
+  const digitPositions: number[] = [];
+  let digitsOnly = '';
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] >= '0' && text[i] <= '9') {
+      digitPositions.push(i);
+      digitsOnly += text[i];
+    }
+  }
+
+  const chars = text.split('');
+  let searchFrom = 0;
+  let matched = false;
+  let idx = digitsOnly.indexOf(code, searchFrom);
+  while (idx !== -1) {
+    matched = true;
+    for (let k = idx; k < idx + code.length; k++) chars[digitPositions[k]] = '*';
+    searchFrom = idx + code.length;
+    idx = digitsOnly.indexOf(code, searchFrom);
+  }
+  return matched ? chars.join('') : text;
+}
+
 export function registerMessageHandlers(socket: TypedSocket, io: TypedSocketServer): void {
   const userId = socket.data.userId;
   const role = socket.data.role;
@@ -36,13 +64,16 @@ export function registerMessageHandlers(socket: TypedSocket, io: TypedSocketServ
   socket.on('message:send', async (payload: MessageSendPayload) => {
     try {
       const rideId = payload?.rideId;
-      const text = (payload?.text ?? '').trim();
+      let text = (payload?.text ?? '').trim();
       if (!rideId || !text || text.length > MAX_MESSAGE_LENGTH) return;
 
       // Yetki kontrolü: sadece bu yolculuğun müşterisi veya atanmış sürücüsü —
       // getRideById tarafı değilse 403, yolculuk yoksa 404 fırlatır.
       const ride = await rideService.getRideById(rideId, userId);
       if (ride.status === 'completed' || ride.status === 'cancelled') return;
+
+      const pickupCode = await rideService.getUnverifiedPickupCode(rideId);
+      if (pickupCode) text = censorPickupCode(text, pickupCode);
 
       const message: MessageNewEvent = {
         rideId,

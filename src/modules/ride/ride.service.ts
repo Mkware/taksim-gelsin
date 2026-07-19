@@ -271,6 +271,22 @@ export async function getRideById(rideId: string, userId: string): Promise<RideD
 }
 
 /**
+ * Sohbet filtresi için: yolculuğun henüz doğrulanmamış biniş PIN'i (varsa).
+ * Doğrulanmışsa veya hiç üretilmemişse null — artık gizlenecek bir şey kalmaz.
+ */
+export async function getUnverifiedPickupCode(rideId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from('rides')
+    .select('pickup_verification_code, pickup_code_verified')
+    .eq('id', rideId)
+    .maybeSingle();
+
+  if (!data || data.pickup_code_verified) return null;
+  const code = (data.pickup_verification_code as string | null)?.trim();
+  return code && code.length === 4 ? code : null;
+}
+
+/**
  * Kullanıcının yolculuk geçmişini listeler (sayfalı)
  */
 export async function listRides(
