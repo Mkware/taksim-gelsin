@@ -383,9 +383,13 @@ class SocketService {
       }
     });
 
-    // Sohbet geçmişi
+    // Sohbet geçmişi — payload tüm mesaj dizisini içerir, debug logunda tamamını
+    // string'e serileştirmek (her reconnect'te) gereksiz ana-thread yükü demek.
     _socket!.on('message:history', (data) {
-      _logEvent('message:history', data);
+      if (kDebugMode) {
+        final count = data is Map ? (data['messages'] as List?)?.length ?? 0 : 0;
+        debugPrint('📥 message:history: rideId=${data is Map ? data['rideId'] : '?'} count=$count');
+      }
       if (data is Map) {
         _messageHistoryController.add(Map<String, dynamic>.from(data));
       }

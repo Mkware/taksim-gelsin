@@ -303,12 +303,18 @@ class _RideChatSheetState extends ConsumerState<RideChatSheet> {
 
 /// Sohbet panelini modal bottom sheet olarak açar.
 /// Açıkken gelen mesajlar okunmamış sayılmaz; kapanınca rozet sıfırlanır.
+///
+/// Sheet zaten açıksa hiçbir şey yapmaz — aksi halde (örn. bildirime arka arkaya
+/// tıklanması, `onMessageOpenedApp`'in aynı mesaj için birden fazla tetiklenmesi gibi
+/// durumlarda) üst üste modal ve yinelenen socket dinleyicileri birikip özellikle
+/// düşük belleğe sahip cihazlarda kasma/OOM crash'e yol açıyordu.
 Future<void> showRideChatSheet(
   BuildContext context, {
   required WidgetRef ref,
   required String rideId,
   required String peerName,
 }) {
+  if (ref.read(rideChatSheetOpenProvider)) return Future<void>.value();
   ref.read(rideChatSheetOpenProvider.notifier).state = true;
   ref.read(chatUnreadCountProvider.notifier).clear();
   return showModalBottomSheet<void>(
