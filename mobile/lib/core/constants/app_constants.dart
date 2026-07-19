@@ -74,4 +74,12 @@ class AppConstants {
 
   /// `MIN_DRIVER_ONLINE_BALANCE_TCOIN` ile sunucu ayarı aynı olmalı (çevrimiçi olmak için min bakiye).
   static const int minDriverOnlineTcoin = 20;
+
+  // —— Zorunlu güncelleme (sunucu `minSupportedAppVersion` altındaki sürümler kilitlenir)
+  /// Android mağaza sayfası — applicationId: com.taksim.gelsin
+  static const String playStoreUrl =
+      'https://play.google.com/store/apps/details?id=com.taksim.gelsin';
+  /// iOS App Store sayfası — uygulama yayınlanınca gerçek id ile doldurun
+  /// (ör. https://apps.apple.com/app/id1234567890). Boşsa buton yalnızca uyarı gösterir.
+  static const String appStoreUrl = '';
 }

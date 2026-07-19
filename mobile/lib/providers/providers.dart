@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants/app_constants.dart';
 import '../models/user_model.dart';
@@ -509,11 +510,27 @@ class PlatformConfigNotifier extends StateNotifier<PlatformConfigData> {
         final d = body['data'];
         if (d is Map) {
           state = PlatformConfigData.fromJson(Map<String, dynamic>.from(d));
+          await _evaluateForceUpdate(state);
         }
       }
     } catch (_) {}
   }
+
+  /// Sunucunun istediği minimum sürümle derlenen sürümü karşılaştırır.
+  /// Sürüm okunamazsa/config gelmezse kilitleme yapılmaz (açık kal).
+  Future<void> _evaluateForceUpdate(PlatformConfigData cfg) async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final required = cfg.requiresUpdate(info.version);
+      final notifier = ref.read(forceUpdateRequiredProvider.notifier);
+      if (notifier.state != required) notifier.state = required;
+    } catch (_) {}
+  }
 }
+
+/// Uygulama sürümü sunucunun `minSupportedAppVersion` değerinin altında —
+/// router tüm ekranları `/force-update` kilidine yönlendirir.
+final forceUpdateRequiredProvider = StateProvider<bool>((ref) => false);
 
 final platformConfigProvider =
     StateNotifierProvider<PlatformConfigNotifier, PlatformConfigData>((ref) {

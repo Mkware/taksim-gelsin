@@ -159,6 +159,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     if (!mounted) return;
 
+    // Sunucu bu sürümü artık desteklemiyorsa oturum/socket kurmadan kilide git.
+    if (ref.read(forceUpdateRequiredProvider)) {
+      await _awaitMinimumSplashDuration();
+      if (!mounted) return;
+      context.go('/force-update');
+      return;
+    }
+
     final UserModel? userInitial = ref.read(currentUserProvider);
     if (userInitial == null) {
       await _awaitMinimumSplashDuration();

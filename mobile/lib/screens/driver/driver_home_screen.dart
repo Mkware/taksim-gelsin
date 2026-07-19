@@ -116,6 +116,10 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
   /// Gelen talep diyaloğu — yalnızca bu context ile kapat (rootNavigator maybePop ana rotayı siler).
   BuildContext? _rideRequestDialogContext;
 
+  /// Aynı istek socket + FCM'den art arda gelebilir; ses/navigasyon await'leri
+  /// sırasında ikinci bir dialog açılmasın.
+  bool _presentingRideRequest = false;
+
   @override
   void initState() {
     super.initState();
@@ -769,12 +773,42 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
 
     final active = ref.read(activeRideProvider);
     if (active != null && active.isActive) return;
-    if (ref.read(pendingRideRequestProvider) != null) return;
 
-    await RideMatchSound.playMatchAlert();
+    // Dialog zaten açıksa ya da açılma sürecindeyse tekrar gösterme.
+    // `pendingRideRequestProvider` dolu ama dialog kapalıysa (ör. bir sayfa
+    // geçişi dialog'u navigator'la birlikte düşürdüyse) yeniden göstererek
+    // takılı kalan durumu onar — eskiden burada erken dönülüyor ve sürücü
+    // isteği bir daha hiç göremiyordu.
+    if (_presentingRideRequest) return;
+    if (_rideRequestDialogContext?.mounted == true) return;
+
+    _presentingRideRequest = true;
+    try {
+      ref.read(pendingRideRequestProvider.notifier).state = data;
+      await RideMatchSound.playMatchAlert();
+      if (!mounted) return;
+      // Dialog, navigator'da o an en üstte olan sayfaya bağlanır: profil veya
+      // cüzdan gibi push edilmiş bir sayfadayken açılırsa, o sayfa kapanınca
+      // (FCM'in go('/driver')'ı dahil) dialog da onunla birlikte gider ve
+      // kabul/reddet çalışmaz. Önce haritaya dön, geçiş işlensin, sonra göster.
+      await _ensureOnDriverHomeRoute();
+      if (!mounted) return;
+      _showRideRequestDialog(data);
+    } finally {
+      _presentingRideRequest = false;
+    }
+  }
+
+  /// Gelen talep diyaloğu her zaman `/driver` sayfası üzerinde açılmalı —
+  /// başka bir sayfadaysak önce oraya dön ve sayfa yığını güncellenene dek bekle.
+  Future<void> _ensureOnDriverHomeRoute() async {
+    final router = GoRouter.of(context);
+    final location = router.routerDelegate.currentConfiguration.uri.path;
+    if (location == '/driver') return;
+    router.go('/driver');
+    await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
-    ref.read(pendingRideRequestProvider.notifier).state = data;
-    _showRideRequestDialog(data);
+    await WidgetsBinding.instance.endOfFrame;
   }
 
   void _closeRideRequestDialogIfOpen() {
@@ -803,7 +837,11 @@ class _DriverHomeScreenState extends ConsumerState<DriverHomeScreen>
           },
         );
       },
-    );
+    ).then((_) {
+      // Dialog bizim pop'umuz dışında (ör. navigator sayfayı kaldırdı diye)
+      // kapanırsa da referans temizlensin ki sonraki istek yeniden gösterilebilsin.
+      _rideRequestDialogContext = null;
+    });
   }
 
   void _acceptRide(Map<String, dynamic> data) {

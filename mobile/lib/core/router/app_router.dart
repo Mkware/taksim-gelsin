@@ -5,6 +5,7 @@ import '../../providers/providers.dart';
 
 // Ekran import'ları
 import '../../screens/splash_screen.dart';
+import '../../screens/force_update_screen.dart';
 import '../../screens/onboarding/onboarding_screen.dart';
 import '../../screens/auth/login_screen.dart';
 import '../../screens/auth/register_screen.dart';
@@ -25,6 +26,7 @@ class _GoRouterRefresh extends ChangeNotifier {
   _GoRouterRefresh(this._ref) {
     _ref.listen<bool>(isLoggedInProvider, (_, __) => notifyListeners());
     _ref.listen<String?>(userRoleProvider, (_, __) => notifyListeners());
+    _ref.listen<bool>(forceUpdateRequiredProvider, (_, __) => notifyListeners());
   }
 
   final Ref _ref;
@@ -46,6 +48,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isAuthRoute = state.uri.path.startsWith('/auth');
       final isLegalRoute = state.uri.path == '/legal';
       final isOnboardingRoute = state.uri.path == '/onboarding';
+
+      // Zorunlu güncelleme — sürüm sunucu minimumunun altındaysa her ekrandan
+      // (splash dahil) kilide yönlendir; kilitten başka yere çıkışa izin verme.
+      final forceUpdate = ref.read(forceUpdateRequiredProvider);
+      if (forceUpdate) {
+        return state.uri.path == '/force-update' ? null : '/force-update';
+      }
+      if (state.uri.path == '/force-update') {
+        // Kilit kalktıysa (ör. admin minimumu geri çekti) splash'ten devam et
+        return '/splash';
+      }
 
       // Splash ekranında yönlendirme yapma
       if (isSplash) return null;
@@ -125,6 +138,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/driver/wallet',
         builder: (context, state) => const DriverWalletScreen(),
+      ),
+
+      // Zorunlu güncelleme kilidi
+      GoRoute(
+        path: '/force-update',
+        builder: (context, state) => const ForceUpdateScreen(),
       ),
 
       // Profil ekranı (rol bağımsız — hem müşteri hem sürücü kullanır)
