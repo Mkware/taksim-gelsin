@@ -14,6 +14,12 @@ import { invalidateSessionVersionCache } from '../../middleware/auth.middleware'
 import { env } from '../../config/env';
 import type { RegisterInput, DriverRegisterInput, LoginInput } from './auth.schema';
 
+// TEMPORARY: gerçek SMS sağlayıcısı (Netgsm/İleti Merkezi vb.) bağlanana kadar
+// tüm OTP istekleri bu sabit kodu kabul ediyor — production'a çıkmadan önce
+// requestLoginOtp'nin gerçek bir kod üretip SMS ile göndermesi ve verifyLoginOtp'nin
+// o kodu (Redis/DB'de TTL'li) karşılaştırması gerekir.
+const TEMP_OTP_CODE = '0000';
+
 // Bcrypt salt round sayısı — şifre hash gücü (12 önerilen)
 const SALT_ROUNDS = 12;
 
@@ -258,6 +264,57 @@ export async function registerDriver(input: DriverRegisterInput): Promise<Driver
 }
 
 /**
+ * Şifre/OTP doğrulaması bittikten sonra ortak oturum açma adımları:
+ * session_version artır, JWT çifti üret, refresh token'ı kaydet, eski
+ * cihazların socket'lerini/push token'larını temizle. `login()` ve
+ * `verifyLoginOtp()` aynı kullanıcı satırı için bunu paylaşır.
+ */
+async function issueSessionForUser(
+  user: Record<string, unknown> & { id: string; phone: string; role: string },
+): Promise<AuthResult> {
+  const { data: curSv } = await supabaseAdmin
+    .from('users')
+    .select('session_version')
+    .eq('id', user.id)
+    .single();
+  const nextSv = (curSv?.session_version ?? 0) + 1;
+
+  const tokenPayload: TokenPayload = { userId: user.id, role: user.role as 'customer' | 'driver', sessionVersion: nextSv };
+  const tokens = generateTokenPair(tokenPayload);
+
+  await supabaseAdmin
+    .from('users')
+    .update({ refresh_token: hashRefreshToken(tokens.refreshToken), session_version: nextSv })
+    .eq('id', user.id);
+
+  // session_version cache'i invalidate et — middleware eski sürümü kullanmasın
+  await invalidateSessionVersionCache(user.id);
+
+  // Yalnızca önceki oturum sürümündeki socket'leri kes (yeni token ile bağlanan cihazı kesme)
+  disconnectStaleSocketsForUser(user.id, nextSv);
+
+  // Tek aktif oturum → push da yalnızca son cihaza gitsin: eski cihazların
+  // token'larını sil; giriş yapan cihaz ana ekranda kendi token'ını yeniden kaydeder.
+  const { error: tokenClearError } = await supabaseAdmin
+    .from('device_push_tokens')
+    .delete()
+    .eq('user_id', user.id);
+  if (tokenClearError) {
+    logger.warn(`Push token temizliği başarısız [${user.id}]:`, tokenClearError.message);
+  }
+
+  logger.info(`Giriş başarılı: ${user.phone} (${user.role})`);
+
+  const completedRides = await countCompletedRides(user.id, user.role as 'customer' | 'driver');
+
+  return {
+    user: mapUserRowToAuthPayload(user, completedRides),
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+  };
+}
+
+/**
  * Giriş (Login)
  * 1. Telefon numarası ile kullanıcıyı bul
  * 2. Şifreyi bcrypt ile karşılaştır
@@ -292,46 +349,64 @@ export async function login(input: LoginInput): Promise<AuthResult> {
     throw new AppError('Hesabınız askıya alınmış. Destek ile iletişime geçin.', 403);
   }
 
-  const { data: curSv } = await supabaseAdmin
+  return issueSessionForUser(user as Record<string, unknown> & { id: string; phone: string; role: string });
+}
+
+/**
+ * SMS OTP isteği — telefon numarasının kayıtlı olduğunu doğrular.
+ *
+ * TEMPORARY: gerçek SMS sağlayıcısı bağlanana kadar hiçbir kod gönderilmiyor;
+ * `verifyLoginOtp` şimdilik sabit [[TEMP_OTP_CODE]] değerini kabul ediyor.
+ */
+export async function requestLoginOtp(phone: string): Promise<void> {
+  const { data: user, error } = await supabaseAdmin
     .from('users')
-    .select('session_version')
-    .eq('id', user.id)
+    .select('id, is_suspended')
+    .eq('phone', phone)
     .single();
-  const nextSv = (curSv?.session_version ?? 0) + 1;
 
-  const tokenPayload: TokenPayload = { userId: user.id, role: user.role, sessionVersion: nextSv };
-  const tokens = generateTokenPair(tokenPayload);
-
-  await supabaseAdmin
-    .from('users')
-    .update({ refresh_token: hashRefreshToken(tokens.refreshToken), session_version: nextSv })
-    .eq('id', user.id);
-
-  // session_version cache'i invalidate et — middleware eski sürümü kullanmasın
-  await invalidateSessionVersionCache(user.id);
-
-  // Yalnızca önceki oturum sürümündeki socket'leri kes (yeni token ile bağlanan cihazı kesme)
-  disconnectStaleSocketsForUser(user.id, nextSv);
-
-  // Tek aktif oturum → push da yalnızca son cihaza gitsin: eski cihazların
-  // token'larını sil; giriş yapan cihaz ana ekranda kendi token'ını yeniden kaydeder.
-  const { error: tokenClearError } = await supabaseAdmin
-    .from('device_push_tokens')
-    .delete()
-    .eq('user_id', user.id);
-  if (tokenClearError) {
-    logger.warn(`Push token temizliği başarısız [${user.id}]:`, tokenClearError.message);
+  if (error || !user) {
+    throw new AppError('Bu telefon numarasıyla kayıtlı bir hesap bulunamadı.', 404);
   }
 
-  logger.info(`Giriş başarılı: ${user.phone} (${user.role})`);
+  if (Boolean((user as { is_suspended?: boolean }).is_suspended)) {
+    throw new AppError('Hesabınız askıya alınmış. Destek ile iletişime geçin.', 403);
+  }
 
-  const completedRides = await countCompletedRides(user.id, user.role as 'customer' | 'driver');
+  // TODO: gerçek SMS sağlayıcısı entegre edilince burada rastgele bir kod
+  // üretilip Redis'e (kısa TTL ile) yazılmalı ve SMS ile gönderilmeli.
+  logger.info(`OTP istendi (test modu, sabit kod): ${phone}`);
+}
 
-  return {
-    user: mapUserRowToAuthPayload(user as Record<string, unknown>, completedRides),
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-  };
+/**
+ * SMS OTP doğrulama + giriş
+ *
+ * TEMPORARY: kod karşılaştırması gerçek bir SMS sağlayıcısı bağlanana kadar
+ * sabit [[TEMP_OTP_CODE]] ile yapılıyor — bu, gerçek bir doğrulama değildir,
+ * yalnızca mobil taraftaki OTP akışını test etmek içindir.
+ */
+export async function verifyLoginOtp(phone: string, code: string): Promise<AuthResult> {
+  if (code !== TEMP_OTP_CODE) {
+    throw new AppError('Kod hatalı. Lütfen tekrar deneyin.', 401);
+  }
+
+  const { data: user, error } = await supabaseAdmin
+    .from('users')
+    .select(
+      'id, phone, full_name, role, rating, rating_count, created_at, avatar_url, is_suspended',
+    )
+    .eq('phone', phone)
+    .single();
+
+  if (error || !user) {
+    throw new AppError('Bu telefon numarasıyla kayıtlı bir hesap bulunamadı.', 404);
+  }
+
+  if (Boolean((user as { is_suspended?: boolean }).is_suspended)) {
+    throw new AppError('Hesabınız askıya alınmış. Destek ile iletişime geçin.', 403);
+  }
+
+  return issueSessionForUser(user as Record<string, unknown> & { id: string; phone: string; role: string });
 }
 
 /**

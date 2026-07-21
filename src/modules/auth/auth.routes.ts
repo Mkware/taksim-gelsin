@@ -18,7 +18,13 @@ import rateLimit from 'express-rate-limit';
 import * as authController from './auth.controller';
 import { validate } from '../../middleware/validate.middleware';
 import { authMiddleware, authMiddlewareLogout } from '../../middleware/auth.middleware';
-import { registerSchema, loginSchema, refreshTokenSchema } from './auth.schema';
+import {
+  registerSchema,
+  loginSchema,
+  refreshTokenSchema,
+  otpRequestSchema,
+  otpVerifySchema,
+} from './auth.schema';
 
 const router = Router();
 
@@ -52,6 +58,31 @@ const refreshLimiter = rateLimit({
   },
 });
 
+// OTP isteği — aynı IP'den SMS spam'ine karşı sıkı limit
+const otpRequestLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 dakika
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Çok fazla kod isteği. Lütfen bir dakika bekleyin.',
+  },
+});
+
+// OTP doğrulama — 4 haneli kodun brute-force ile denenmesine karşı sıkı limit
+const otpVerifyLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 dakika
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: {
+    success: false,
+    error: 'Çok fazla deneme. Lütfen bir dakika bekleyin.',
+  },
+});
+
 // Kayıt — IP başına saatlik limit (spam ve otomatik hesap açmaya karşı)
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 saat
@@ -73,6 +104,10 @@ router.post('/register', registerLimiter, validate(registerSchema), authControll
 
 // Giriş — telefon + şifre (brute-force koruması)
 router.post('/login', loginLimiter, validate(loginSchema), authController.login);
+
+// SMS OTP ile giriş — kod isteği + doğrulama (bkz. auth.service.ts TEMP_OTP_CODE notu)
+router.post('/otp/request', otpRequestLimiter, validate(otpRequestSchema), authController.requestOtp);
+router.post('/otp/verify', otpVerifyLimiter, validate(otpVerifySchema), authController.verifyOtp);
 
 // Token yenileme — refresh token ile yeni access token al
 router.post('/refresh', refreshLimiter, validate(refreshTokenSchema), authController.refreshToken);

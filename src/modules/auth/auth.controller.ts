@@ -71,6 +71,59 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
 }
 
 /**
+ * POST /api/v1/auth/otp/request
+ * SMS OTP isteği — telefonun kayıtlı olduğunu doğrular (kod gönderimi TEMPORARY sabit).
+ * Body: { phone }
+ */
+export async function requestOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    await authService.requestLoginOtp(req.body.phone);
+
+    res.json({
+      success: true,
+      message: 'Doğrulama kodu gönderildi.',
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      next(error);
+      return;
+    }
+    logger.error('OTP isteği hatası:', error);
+    next(new AppError('Kod gönderilirken beklenmeyen bir hata oluştu.', 500));
+  }
+}
+
+/**
+ * POST /api/v1/auth/otp/verify
+ * SMS OTP doğrulama — telefon + kod ile kimlik doğrulama, başarılıysa giriş yapar.
+ * Body: { phone, code }
+ */
+export async function verifyOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const result = await authService.verifyLoginOtp(req.body.phone, req.body.code);
+
+    res.json({
+      success: true,
+      message: 'Giriş başarılı.',
+      data: {
+        user: result.user,
+        tokens: {
+          access_token: result.accessToken,
+          refresh_token: result.refreshToken,
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      next(error);
+      return;
+    }
+    logger.error('OTP doğrulama hatası:', error);
+    next(new AppError('Doğrulama sırasında beklenmeyen bir hata oluştu.', 500));
+  }
+}
+
+/**
  * POST /api/v1/auth/refresh
  * Access token yenileme
  * Body: { refresh_token }

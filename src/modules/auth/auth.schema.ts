@@ -99,8 +99,27 @@ export const refreshTokenSchema = z.object({
     .min(1, 'Refresh token boş olamaz.'),
 });
 
+/**
+ * SMS OTP isteği — sadece telefon numarası
+ */
+export const otpRequestSchema = z.object({
+  phone: trPhoneSchema,
+});
+
+/**
+ * SMS OTP doğrulama — telefon + 4 haneli kod
+ */
+export const otpVerifySchema = z.object({
+  phone: trPhoneSchema,
+  code: z
+    .string()
+    .regex(/^[0-9]{4}$/, 'Kod 4 haneli olmalı.'),
+});
+
 // Tip çıkarımları — Controller'da kullanılır
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type DriverRegisterInput = z.infer<typeof driverRegisterSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
+export type OtpRequestInput = z.infer<typeof otpRequestSchema>;
+export type OtpVerifyInput = z.infer<typeof otpVerifySchema>;
