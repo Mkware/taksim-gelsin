@@ -95,17 +95,29 @@ export async function requestOtp(req: Request, res: Response, next: NextFunction
 
 /**
  * POST /api/v1/auth/otp/verify
- * SMS OTP doğrulama — telefon + kod ile kimlik doğrulama, başarılıysa giriş yapar.
+ * SMS OTP doğrulama — hesap varsa direkt giriş yapar; yoksa mobilin ad-soyad
+ * alıp POST /auth/otp/complete'i çağırması için needs_registration döner.
  * Body: { phone, code }
  */
 export async function verifyOtp(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const result = await authService.verifyLoginOtp(req.body.phone, req.body.code);
+    const outcome = await authService.verifyLoginOtp(req.body.phone, req.body.code);
 
+    if (outcome.status === 'needs_registration') {
+      res.json({
+        success: true,
+        message: 'Kod doğrulandı. Hesap oluşturmak için ad soyad gerekli.',
+        data: { needs_registration: true },
+      });
+      return;
+    }
+
+    const { result } = outcome;
     res.json({
       success: true,
       message: 'Giriş başarılı.',
       data: {
+        needs_registration: false,
         user: result.user,
         tokens: {
           access_token: result.accessToken,
@@ -120,6 +132,46 @@ export async function verifyOtp(req: Request, res: Response, next: NextFunction)
     }
     logger.error('OTP doğrulama hatası:', error);
     next(new AppError('Doğrulama sırasında beklenmeyen bir hata oluştu.', 500));
+  }
+}
+
+/**
+ * POST /api/v1/auth/otp/complete
+ * OTP ile doğrulanmış bir telefon için ad-soyad alıp müşteri hesabı oluşturur
+ * ve direkt oturum açar. Yalnızca `verifyOtp` "needs_registration" döndükten
+ * sonra çağrılmalı.
+ * Body: { phone, code, full_name }
+ */
+export async function completeOtpRegistration(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const result = await authService.completeOtpRegistration(
+      req.body.phone,
+      req.body.code,
+      req.body.full_name,
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Kayıt başarılı. Hoş geldiniz!',
+      data: {
+        user: result.user,
+        tokens: {
+          access_token: result.accessToken,
+          refresh_token: result.refreshToken,
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      next(error);
+      return;
+    }
+    logger.error('OTP ile kayıt hatası:', error);
+    next(new AppError('Kayıt sırasında beklenmeyen bir hata oluştu.', 500));
   }
 }
 

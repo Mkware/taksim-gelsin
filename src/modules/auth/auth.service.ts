@@ -338,6 +338,11 @@ export async function login(input: LoginInput): Promise<AuthResult> {
     throw new AppError('Telefon numarası veya şifre hatalı.', 401);
   }
 
+  if (!user.password_hash) {
+    // SMS OTP ile oluşturulmuş hesapların şifresi yok — tek giriş yolu OTP.
+    throw new AppError('Bu hesapta şifre tanımlı değil. SMS kodu ile giriş yapın.', 401);
+  }
+
   // Şifre karşılaştırma (bcrypt compare)
   const isPasswordValid = await bcrypt.compare(password, user.password_hash);
 
@@ -353,23 +358,21 @@ export async function login(input: LoginInput): Promise<AuthResult> {
 }
 
 /**
- * SMS OTP isteği — telefon numarasının kayıtlı olduğunu doğrular.
+ * SMS OTP isteği — birleşik giriş/kayıt akışının ilk adımı. Telefon
+ * kayıtlı olsun olmasın kod "gönderilir" (bilgi sızdırmamak için var/yok
+ * ayrımı burada yapılmıyor — `verifyLoginOtp` doğrulama sonrası ayırt eder).
  *
  * TEMPORARY: gerçek SMS sağlayıcısı bağlanana kadar hiçbir kod gönderilmiyor;
  * `verifyLoginOtp` şimdilik sabit [[TEMP_OTP_CODE]] değerini kabul ediyor.
  */
 export async function requestLoginOtp(phone: string): Promise<void> {
-  const { data: user, error } = await supabaseAdmin
+  const { data: user } = await supabaseAdmin
     .from('users')
-    .select('id, is_suspended')
+    .select('is_suspended')
     .eq('phone', phone)
     .single();
 
-  if (error || !user) {
-    throw new AppError('Bu telefon numarasıyla kayıtlı bir hesap bulunamadı.', 404);
-  }
-
-  if (Boolean((user as { is_suspended?: boolean }).is_suspended)) {
+  if (user && Boolean((user as { is_suspended?: boolean }).is_suspended)) {
     throw new AppError('Hesabınız askıya alınmış. Destek ile iletişime geçin.', 403);
   }
 
@@ -378,14 +381,20 @@ export async function requestLoginOtp(phone: string): Promise<void> {
   logger.info(`OTP istendi (test modu, sabit kod): ${phone}`);
 }
 
+export type OtpVerifyResult =
+  | { status: 'logged_in'; result: AuthResult }
+  | { status: 'needs_registration' };
+
 /**
- * SMS OTP doğrulama + giriş
+ * SMS OTP doğrulama — birleşik giriş/kayıt akışının ikinci adımı.
+ * Hesap zaten varsa direkt giriş yapılır; yoksa `needs_registration` döner
+ * ve mobil, ad-soyad alıp `completeOtpRegistration`'ı çağırır.
  *
  * TEMPORARY: kod karşılaştırması gerçek bir SMS sağlayıcısı bağlanana kadar
  * sabit [[TEMP_OTP_CODE]] ile yapılıyor — bu, gerçek bir doğrulama değildir,
  * yalnızca mobil taraftaki OTP akışını test etmek içindir.
  */
-export async function verifyLoginOtp(phone: string, code: string): Promise<AuthResult> {
+export async function verifyLoginOtp(phone: string, code: string): Promise<OtpVerifyResult> {
   if (code !== TEMP_OTP_CODE) {
     throw new AppError('Kod hatalı. Lütfen tekrar deneyin.', 401);
   }
@@ -399,14 +408,68 @@ export async function verifyLoginOtp(phone: string, code: string): Promise<AuthR
     .single();
 
   if (error || !user) {
-    throw new AppError('Bu telefon numarasıyla kayıtlı bir hesap bulunamadı.', 404);
+    return { status: 'needs_registration' };
   }
 
   if (Boolean((user as { is_suspended?: boolean }).is_suspended)) {
     throw new AppError('Hesabınız askıya alınmış. Destek ile iletişime geçin.', 403);
   }
 
-  return issueSessionForUser(user as Record<string, unknown> & { id: string; phone: string; role: string });
+  const result = await issueSessionForUser(
+    user as Record<string, unknown> & { id: string; phone: string; role: string },
+  );
+  return { status: 'logged_in', result };
+}
+
+/**
+ * SMS OTP kaydı tamamla — birleşik akışın üçüncü (yalnızca yeni hesaplar
+ * için) adımı. Kod tekrar doğrulanır (telefon sahipliği kanıtı), ardından
+ * şifresiz bir müşteri hesabı oluşturulup direkt oturum açılır.
+ *
+ * Sürücüler bu yoldan oluşmaz — sürücü self-kaydı yok (bkz. registerDriver
+ * ve admin panelindeki manuel ekleme akışı); burada oluşan hesap her zaman
+ * 'customer' rolündedir.
+ */
+export async function completeOtpRegistration(
+  phone: string,
+  code: string,
+  fullName: string,
+): Promise<AuthResult> {
+  if (code !== TEMP_OTP_CODE) {
+    throw new AppError('Kod hatalı. Lütfen tekrar deneyin.', 401);
+  }
+
+  const { data: existing } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('phone', phone)
+    .single();
+
+  if (existing) {
+    throw new AppError('Bu telefon numarası zaten kayıtlı.', 409);
+  }
+
+  const { data: user, error } = await supabaseAdmin
+    .from('users')
+    .insert({
+      phone,
+      full_name: fullName,
+      password_hash: null,
+      role: 'customer' as const,
+    })
+    .select('id, phone, full_name, role, rating, rating_count, created_at, avatar_url')
+    .single();
+
+  if (error || !user) {
+    logger.error('OTP ile müşteri kaydı başarısız:', error);
+    throw new AppError('Kayıt sırasında bir hata oluştu.', 500);
+  }
+
+  logger.info(`Yeni müşteri kaydı (OTP): ${user.phone} (${user.id})`);
+
+  return issueSessionForUser(
+    user as Record<string, unknown> & { id: string; phone: string; role: string },
+  );
 }
 
 /**

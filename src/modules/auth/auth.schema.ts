@@ -116,6 +116,21 @@ export const otpVerifySchema = z.object({
     .regex(/^[0-9]{4}$/, 'Kod 4 haneli olmalı.'),
 });
 
+/**
+ * SMS OTP kaydını tamamlama — telefon + kod (tekrar doğrulanır) + ad soyad
+ */
+export const otpCompleteSchema = z.object({
+  phone: trPhoneSchema,
+  code: z
+    .string()
+    .regex(/^[0-9]{4}$/, 'Kod 4 haneli olmalı.'),
+  full_name: z
+    .string()
+    .min(2, 'İsim en az 2 karakter olmalı.')
+    .max(100, 'İsim en fazla 100 karakter olabilir.')
+    .trim(),
+});
+
 // Tip çıkarımları — Controller'da kullanılır
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type DriverRegisterInput = z.infer<typeof driverRegisterSchema>;
@@ -123,3 +138,4 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type OtpRequestInput = z.infer<typeof otpRequestSchema>;
 export type OtpVerifyInput = z.infer<typeof otpVerifySchema>;
+export type OtpCompleteInput = z.infer<typeof otpCompleteSchema>;

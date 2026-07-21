@@ -24,6 +24,7 @@ import {
   refreshTokenSchema,
   otpRequestSchema,
   otpVerifySchema,
+  otpCompleteSchema,
 } from './auth.schema';
 
 const router = Router();
@@ -105,9 +106,16 @@ router.post('/register', registerLimiter, validate(registerSchema), authControll
 // Giriş — telefon + şifre (brute-force koruması)
 router.post('/login', loginLimiter, validate(loginSchema), authController.login);
 
-// SMS OTP ile giriş — kod isteği + doğrulama (bkz. auth.service.ts TEMP_OTP_CODE notu)
+// SMS OTP ile birleşik giriş/kayıt — istek + doğrulama + (yeni hesapsa) tamamlama
+// (bkz. auth.service.ts TEMP_OTP_CODE notu)
 router.post('/otp/request', otpRequestLimiter, validate(otpRequestSchema), authController.requestOtp);
 router.post('/otp/verify', otpVerifyLimiter, validate(otpVerifySchema), authController.verifyOtp);
+router.post(
+  '/otp/complete',
+  otpVerifyLimiter,
+  validate(otpCompleteSchema),
+  authController.completeOtpRegistration,
+);
 
 // Token yenileme — refresh token ile yeni access token al
 router.post('/refresh', refreshLimiter, validate(refreshTokenSchema), authController.refreshToken);
